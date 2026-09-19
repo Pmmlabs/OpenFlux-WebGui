@@ -1,0 +1,87 @@
+transport/yandex/vyandex.go
+  s_fdc14419c4124e::t_de1f51915bffbe 441,461-475,598-602,619-620,638,671,677,680,688,728,739-753,792-796,828-832,835-837,839-840,848,865,913-914
+exitmgr/transport.go
+  s_fdc14419c4124e::t_de1f51915bffbe 11,14-21,57-61,78
+  s_fdc14419c4124e::t_d9860a2cb5bdde 22-26,41-46,56,63-65,69,77
+  s_fdc14419c4124e::t_dfb7a3484867de 70-76
+telegrambot/api.go
+  s_fdc14419c4124e::t_de1f51915bffbe 1-152
+exitmgr/transport_test.go
+  s_fdc14419c4124e::t_de1f51915bffbe 13-23,28,35,38,42-46,52-75,79,85,87-126,128-130
+exitmgr/manager.go
+  s_fdc14419c4124e::t_de1f51915bffbe 11,25-30,270-272,277-295
+  s_fdc14419c4124e::t_2bf80782a53eec 296-297
+telegrambot/bot_test.go
+  s_fdc14419c4124e::t_de1f51915bffbe 1-315
+exitmgr/manager_test.go
+  s_fdc14419c4124e::t_de1f51915bffbe 55-58
+README.ru.md
+  s_fdc14419c4124e::t_de1f51915bffbe 39-45,48-49,53-103,105-106,115-123,125-127,229-231,237-240,243-246,252-253,291-294,355-366,374-390,407-433,525-526,580-597,630,646-647
+encryption_setup_test.go
+  s_fdc14419c4124e::t_b86f173d458ca9 91,108,128,130
+transportstack/transportstack_test.go
+  s_fdc14419c4124e::t_de1f51915bffbe 1-192
+deploy/menu.sh
+  s_fdc14419c4124e::t_de1f51915bffbe 1-406
+telegrambot/bot.go
+  s_fdc14419c4124e::t_de1f51915bffbe 1-497
+main.go
+  s_fdc14419c4124e::t_b389a5e2cf97b8 572-573
+  s_fdc14419c4124e::t_192d9c04fa486b 446-449,451,454,464
+  s_fdc14419c4124e::t_de1f51915bffbe 20,22,35,130-131,145-146,215-219,256,354-358,395,450,452-453,455-456,465-471,488-489,548-570,606-617,631-633,647-656
+  s_fdc14419c4124e::t_dfb7a3484867de 457-463
+encryption_setup.go
+  s_fdc14419c4124e::t_dfb7a3484867de 31,33-34
+  s_fdc14419c4124e::t_6afa91b1bbe661 106
+  s_fdc14419c4124e::t_ff9b0f310426d8 23-29,32
+  s_fdc14419c4124e::t_4b5ee43f219e5c 51,54
+transport/yandex/yandex_test.go
+  s_fdc14419c4124e::t_de1f51915bffbe 5,148-182
+transport/encrypted_test.go
+  s_fdc14419c4124e::t_de1f51915bffbe 327-337
+export_ios.go
+  s_fdc14419c4124e::t_c97dbaf778c1d5 163-166,172,174,179,181
+panel/static/app.js
+  s_fdc14419c4124e::t_de1f51915bffbe 16-19,117-118,122-128,132,253-254,258,277-284
+  s_fdc14419c4124e::t_79ae36d7c3703d 285-286
+transport/cupsonline/cupsonline.go
+  s_fdc14419c4124e::t_de1f51915bffbe 153-155,292,310-321,350-355,358-361,363,385-390,395,397-400,425,434,443,474-477,481,510-515,551-555,573-574,613-617,705-707,791,890-893,896,977-981,983,1022-1027
+  s_fdc14419c4124e::t_d0d834040cf509 1028
+transport/mailru/mailru.go
+  s_fdc14419c4124e::t_de1f51915bffbe 17,193,303-311
+  s_fdc14419c4124e::t_c9050a00d60897 312-313
+panel/static/style.css
+  s_fdc14419c4124e::t_de1f51915bffbe 146-157
+exitmgr/config.go
+  s_fdc14419c4124e::t_de1f51915bffbe 18,44
+transport/yandex/lifecycle_test.go
+  s_fdc14419c4124e::t_de1f51915bffbe 170,176,253,292,298,300,304
+transport/encrypted.go
+  s_fdc14419c4124e::t_de1f51915bffbe 219-233
+transport/yandex/yandex.go
+  s_fdc14419c4124e::t_de1f51915bffbe 6,414-416,418,421-425,427,429-432,440-441,459-476,480,571-572
+transportstack/transportstack.go
+  s_fdc14419c4124e::t_f6a338bfab7de1 47-48,50-56
+  s_fdc14419c4124e::t_d796c0eef69b8e 91-95,115-117,119-133
+  s_fdc14419c4124e::t_de1f51915bffbe 1-46,49,57-90,96-114,118,134-172
+panel/static/index.html
+  s_fdc14419c4124e::t_de1f51915bffbe 70,73-79
+README.md
+  s_fdc14419c4124e::t_de1f51915bffbe 36-41,44,48-95,97-98,107-114,116-117,218-220,226-228,231-234,240-241,279-282,343-354,361-377,395-419,510-512,565-581,614,630-631
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "66bbbcc2542fdddc2a369bc2a01a279359f5ca02",
+  "prompts": {},
+  "sessions": {
+    "s_fdc14419c4124e": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f4a608ec2ffeoj39NPq2OHBxK1",
+        "model": "glm-5.3"
+      },
+      "human_author": "Pmmlabs <microreticulum@pmmlabs.ru>"
+    }
+  }
+}
