@@ -21,7 +21,11 @@
 # stop the rest of their own work use explicit `|| return 1`.
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# readlink -f resolves the full symlink chain: BASH_SOURCE[0] alone would
+# still be the symlink path (e.g. /usr/local/bin/openflux-ctl) when run via
+# the symlink this script's own header suggests creating, pointing
+# SCRIPT_DIR at /usr instead of the actual repo checkout.
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 CONFIG_FILE="${OPENFLUX_CTL_CONFIG:-/root/.openflux-ctl.env}"
 COOKIE_JAR="$(mktemp)"
 trap 'rm -f "$COOKIE_JAR"' EXIT
@@ -32,10 +36,20 @@ BIN_PATH="$SCRIPT_DIR/openflux"
 PANEL_ADDR="127.0.0.1:8088"
 PANEL_USER=""
 PANEL_PASS=""
-PANEL_DATA="$SCRIPT_DIR/clients.json"
-PANEL_KEY_FILE="$SCRIPT_DIR/panel.key"
+# Match main.go's own flag defaults exactly (openflux-clients.json /
+# openflux-panel.key) -- these are the paths a deployment gets if
+# --panel-data/--panel-key-file were never explicitly passed. A mismatch
+# here isn't cosmetic: detect_from_override only fills these vars in when
+# the flag is actually present in ExecStart, so an implicit-default
+# deployment falls through to whatever's hardcoded here. Get it wrong and
+# apply_override switches to a *different* key/registry file -- for
+# --panel-key-file specifically, that means a brand new Noise keypair,
+# silently orphaning every client's peer-key.
+PANEL_DATA="$SCRIPT_DIR/openflux-clients.json"
+PANEL_KEY_FILE="$SCRIPT_DIR/openflux-panel.key"
 TELEGRAM_BOT_TOKEN=""
 TELEGRAM_ADMIN_IDS=""
+YANDEX_TOKEN_FILE=""
 
 # ---------- small helpers ----------
 
@@ -59,6 +73,18 @@ ensure_jq() {
 
 pause() { read -rp "Press Enter to continue..." _; }
 
+# Strips one leading/trailing '"' if present. apply_override wraps every
+# flag value in double quotes (systemd.syntax(7)); grep -oP '\S+' has no
+# notion of quoting, so without this every value detect_from_override reads
+# back out would carry a stray trailing '"' (and the binary path a leading
+# one too).
+strip_quotes() {
+    local v="$1"
+    v="${v%\"}"
+    v="${v#\"}"
+    printf '%s' "$v"
+}
+
 load_config() {
     if [ -f "$CONFIG_FILE" ]; then
         # shellcheck source=/dev/null
@@ -78,6 +104,7 @@ PANEL_DATA=$(printf '%q' "$PANEL_DATA")
 PANEL_KEY_FILE=$(printf '%q' "$PANEL_KEY_FILE")
 TELEGRAM_BOT_TOKEN=$(printf '%q' "$TELEGRAM_BOT_TOKEN")
 TELEGRAM_ADMIN_IDS=$(printf '%q' "$TELEGRAM_ADMIN_IDS")
+YANDEX_TOKEN_FILE=$(printf '%q' "$YANDEX_TOKEN_FILE")
 EOF
     chmod 600 "$CONFIG_FILE"
 }
@@ -87,20 +114,22 @@ EOF
 # defaults instead of asking the operator to retype a working config.
 detect_from_override() {
     local override="/etc/systemd/system/${SERVICE}.service.d/override.conf"
-    [ -f "$override" ] || return 0
+    [ -f "$override" ] || return 1
     local line
     line="$(grep -m1 '^ExecStart=/' "$override" 2>/dev/null || true)"
-    [ -n "$line" ] || return 0
+    [ -n "$line" ] || return 1
 
     local val
-    val="$(grep -oP '(?<=^ExecStart=)\S+' <<<"$line" || true)"; [ -n "$val" ] && BIN_PATH="$val"
-    val="$(grep -oP '(?<=--panel-addr=)\S+' <<<"$line" || true)"; [ -n "$val" ] && PANEL_ADDR="$val"
-    val="$(grep -oP '(?<=--panel-user=)\S+' <<<"$line" || true)"; [ -n "$val" ] && PANEL_USER="$val"
-    val="$(grep -oP '(?<=--panel-pass=)\S+' <<<"$line" || true)"; [ -n "$val" ] && PANEL_PASS="$val"
-    val="$(grep -oP '(?<=--panel-data=)\S+' <<<"$line" || true)"; [ -n "$val" ] && PANEL_DATA="$val"
-    val="$(grep -oP '(?<=--panel-key-file=)\S+' <<<"$line" || true)"; [ -n "$val" ] && PANEL_KEY_FILE="$val"
-    val="$(grep -oP '(?<=--telegram-bot-token=)\S+' <<<"$line" || true)"; [ -n "$val" ] && TELEGRAM_BOT_TOKEN="$val"
-    val="$(grep -oP '(?<=--telegram-admin-ids=)\S+' <<<"$line" || true)"; [ -n "$val" ] && TELEGRAM_ADMIN_IDS="$val"
+    val="$(grep -oP '(?<=^ExecStart=)\S+' <<<"$line" || true)"; [ -n "$val" ] && BIN_PATH="$(strip_quotes "$val")"
+    val="$(grep -oP '(?<=--panel-addr=)\S+' <<<"$line" || true)"; [ -n "$val" ] && PANEL_ADDR="$(strip_quotes "$val")"
+    val="$(grep -oP '(?<=--panel-user=)\S+' <<<"$line" || true)"; [ -n "$val" ] && PANEL_USER="$(strip_quotes "$val")"
+    val="$(grep -oP '(?<=--panel-pass=)\S+' <<<"$line" || true)"; [ -n "$val" ] && PANEL_PASS="$(strip_quotes "$val")"
+    val="$(grep -oP '(?<=--panel-data=)\S+' <<<"$line" || true)"; [ -n "$val" ] && PANEL_DATA="$(strip_quotes "$val")"
+    val="$(grep -oP '(?<=--panel-key-file=)\S+' <<<"$line" || true)"; [ -n "$val" ] && PANEL_KEY_FILE="$(strip_quotes "$val")"
+    val="$(grep -oP '(?<=--telegram-bot-token=)\S+' <<<"$line" || true)"; [ -n "$val" ] && TELEGRAM_BOT_TOKEN="$(strip_quotes "$val")"
+    val="$(grep -oP '(?<=--telegram-admin-ids=)\S+' <<<"$line" || true)"; [ -n "$val" ] && TELEGRAM_ADMIN_IDS="$(strip_quotes "$val")"
+    val="$(grep -oP '(?<=--yandex-token-file=)\S+' <<<"$line" || true)"; [ -n "$val" ] && YANDEX_TOKEN_FILE="$(strip_quotes "$val")"
+    return 0
 }
 
 prompt_default() {
@@ -123,8 +152,10 @@ first_time_setup() {
     while [ -z "$PANEL_PASS" ]; do PANEL_PASS="$(prompt_default "panel admin password (required)" "")"; done
     PANEL_DATA="$(prompt_default "clients registry path" "$PANEL_DATA")"
     PANEL_KEY_FILE="$(prompt_default "panel Noise key file path" "$PANEL_KEY_FILE")"
+    YANDEX_TOKEN_FILE="$(prompt_default "yandex OAuth token file path (optional -- enables the panel's document-generation card; empty disables it; the file need not exist yet)" "$YANDEX_TOKEN_FILE")"
     save_config
-    echo "Saved to $CONFIG_FILE."
+    echo "Saved to $CONFIG_FILE. Applying..."
+    apply_override
     pause
 }
 
@@ -167,6 +198,25 @@ apply_override() {
         exec_start="$exec_start $(sdarg --telegram-bot-token "$TELEGRAM_BOT_TOKEN")"
         exec_start="$exec_start $(sdarg --telegram-admin-ids "$TELEGRAM_ADMIN_IDS")"
     fi
+    if [ -n "$YANDEX_TOKEN_FILE" ]; then
+        exec_start="$exec_start $(sdarg --yandex-token-file "$YANDEX_TOKEN_FILE")"
+    fi
+
+    # A missing key file isn't wrong on a genuinely first-ever start (the
+    # binary creates one), but on a service that's already been running
+    # it almost always means PANEL_KEY_FILE just got pointed at the wrong
+    # path -- which silently mints a brand new Noise keypair and orphans
+    # every existing client's --peer-key. Confirm before restarting into
+    # that, rather than discovering it from "the app doesn't get internet".
+    if [ ! -f "$PANEL_KEY_FILE" ] && systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
+        echo "warning: $SERVICE is already running, but $PANEL_KEY_FILE doesn't exist." >&2
+        echo "Restarting with this path will generate a NEW key and disconnect every existing client." >&2
+        read -rp "Continue anyway? Type 'yes' to confirm: " confirm_key
+        if [ "$confirm_key" != "yes" ]; then
+            echo "cancelled -- not restarting."
+            return 1
+        fi
+    fi
 
     cat >"$dir/override.conf" <<EOF
 [Service]
@@ -179,6 +229,13 @@ EOF
     sleep 1
     if systemctl is-active --quiet "$SERVICE"; then
         echo "OK: $SERVICE is running."
+        # Belt-and-suspenders: catch a new key even if the pre-check above
+        # missed it for some other reason (e.g. a typo'd path that
+        # happens to exist but isn't the real key).
+        if journalctl -u "$SERVICE" --no-pager -n 5 | grep -qF 'PANEL PUBLIC KEY (generated and saved to'; then
+            echo "WARNING: a NEW Noise key was just generated -- every existing client's" >&2
+            echo "--peer-key is now stale. Re-check option 6 and re-add/re-scan clients." >&2
+        fi
     else
         echo "error: $SERVICE did not come up healthy. Recent logs:" >&2
         journalctl -u "$SERVICE" -n 20 --no-pager >&2

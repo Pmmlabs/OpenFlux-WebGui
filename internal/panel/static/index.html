@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>OpenFlux — панель управления</title>
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+
+<div id="login-view" class="view">
+  <form id="login-form" class="login-card">
+    <h1>OpenFlux</h1>
+    <p class="subtitle">Панель управления exit-node</p>
+    <label>Логин
+      <input type="text" id="login-user" autocomplete="username" required />
+    </label>
+    <label>Пароль
+      <input type="password" id="login-pass" autocomplete="current-password" required />
+    </label>
+    <div id="login-error" class="error-text"></div>
+    <button type="submit" class="primary">Войти</button>
+  </form>
+</div>
+
+<div id="dashboard-view" class="view" style="display:none">
+  <header>
+    <h1>OpenFlux</h1>
+    <div class="header-actions">
+      <button id="add-client-btn" class="primary">+ Добавить клиента</button>
+      <button id="logout-btn" class="ghost">Выйти</button>
+    </div>
+  </header>
+
+  <main>
+    <div id="panel-key-card" class="panel-key-card">
+      <div class="panel-key-label">Публичный ключ панели (--peer-key для клиентов)</div>
+      <div class="panel-key-row">
+        <code id="panel-key-value">…</code>
+        <button type="button" id="panel-key-copy" class="ghost small">Копировать</button>
+      </div>
+    </div>
+
+    <div id="yandex-token-card" class="panel-key-card" style="display:none">
+      <div class="panel-key-label">Yandex OAuth токен (для автосоздания документов --url)</div>
+      <div id="yandex-token-status" class="hint-text"></div>
+      <div class="panel-key-row">
+        <input type="password" id="yandex-token-input" placeholder="Вставь токен, чтобы задать или заменить" autocomplete="off" />
+        <button type="button" id="yandex-token-save" class="ghost small">Сохранить</button>
+        <button type="button" id="yandex-token-clear" class="ghost small">Отключить</button>
+      </div>
+      <div id="yandex-token-error" class="error-text"></div>
+    </div>
+
+    <div id="clients-empty" class="empty-state" style="display:none">
+      Нет ни одного клиента. Добавь первого.
+    </div>
+    <div id="clients-list"></div>
+  </main>
+</div>
+
+<div id="add-modal" class="modal-overlay" style="display:none">
+  <form id="add-form" class="modal-card">
+    <h2 id="add-modal-title">Новый клиент</h2>
+
+    <label>Имя
+      <input type="text" id="f-name" required />
+    </label>
+
+    <label>Транспорт
+      <select id="f-transport">
+        <option value="yandex">Yandex.Docs</option>
+        <option value="vyandex">Yandex.Docs (Volga)</option>
+        <option value="oneme">MAX Messenger</option>
+        <option value="cupsonline">Cups.online</option>
+        <option value="mailru">Mail.ru Docs</option>
+      </select>
+    </label>
+
+    <div id="f-url-group" class="field-group">
+      <label id="f-url-label">URL документа
+        <div class="input-with-button">
+          <input type="text" id="f-url" placeholder="https://disk.yandex.com/i/..." />
+          <button type="button" id="f-url-generate" class="ghost small" style="display:none">Сгенерировать</button>
+        </div>
+      </label>
+      <div id="f-url-generate-error" class="error-text"></div>
+      <div id="f-url-yandex-native-note" class="hint-text" style="display:none">
+        Автогенерация недоступна для Yandex.Docs: загруженный через API файл Яндекс всегда открывает через другой движок (Volga), несовместимый с этим транспортом. Для этого транспорта документ нужно создать вручную на docs.yandex.ru и поделиться ссылкой «Может редактировать». Автогенерация работает для Yandex.Docs (Volga).
+      </div>
+      <div id="f-url-hint" class="hint-text" style="display:none">
+        Несколько документов через запятую — один туннель поверх всех сразу (multi-stream): если один документ отвалится, туннель продолжит работать через остальные. У клиента должен быть тот же набор адресов.
+      </div>
+    </div>
+
+    <div id="f-cupsonline-note" class="hint-text" style="display:none">
+      Комнаты создаются автоматически при старте. Ссылку для клиента (--url) будет видно на карточке после добавления.
+    </div>
+
+    <div id="f-max-group" class="field-group" style="display:none">
+      <label>MAX Access Token
+        <input type="text" id="f-max-token" />
+      </label>
+      <label>MAX User ID
+        <input type="text" id="f-max-uid" />
+      </label>
+    </div>
+
+    <label>Кодек
+      <select id="f-codec">
+        <option value="">batched (по умолчанию)</option>
+        <option value="legacy">legacy (старые exit-узлы)</option>
+      </select>
+    </label>
+
+    <label>Файл общего секрета PSK (необязательно, закрывает клиента от посторонних)
+      <input type="text" id="f-psk-file" placeholder="/path/to/secret.txt" />
+    </label>
+
+    <div id="add-error" class="error-text"></div>
+
+    <div class="modal-actions">
+      <button type="button" id="add-cancel-btn" class="ghost">Отмена</button>
+      <button type="submit" id="add-submit-btn" class="primary">Добавить</button>
+    </div>
+  </form>
+</div>
+
+<div id="qr-modal" class="modal-overlay" style="display:none">
+  <div class="modal-card qr-card">
+    <h2 id="qr-modal-title">QR-код клиента</h2>
+    <p class="hint-text">Отсканировать в приложении OpenFlux (кнопка «+» на экране туннелей) — добавит и настроит клиента автоматически.</p>
+    <img id="qr-image" alt="QR-код клиента" />
+    <div id="qr-error" class="error-text"></div>
+    <div class="modal-actions">
+      <button type="button" id="qr-close-btn" class="ghost">Закрыть</button>
+    </div>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>
