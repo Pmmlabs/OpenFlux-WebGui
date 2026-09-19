@@ -1,0 +1,86 @@
+docker/entrypoint.sh
+  s_fdc14419c4124e::t_0618b121b12bcd 49-51
+transport/encrypted_v1.go
+  s_fdc14419c4124e::t_127c60e0cc4566 19,21-22
+  s_fdc14419c4124e::t_a328d5ece3f42a 16-18
+  s_fdc14419c4124e::t_eaeabeb220099a 20
+  s_fdc14419c4124e::t_64aa19cd221694 23-25
+encryption_setup_test.go
+  s_fdc14419c4124e::t_5a096bf237cb35 117-127,129-137
+  s_fdc14419c4124e::t_68c386aa9c1ec4 91,108,128
+  s_fdc14419c4124e::t_5db8046b745051 24-25,27,29,32
+  s_fdc14419c4124e::t_d4fe5d43e1a3d9 15-16
+export_ios.go
+  s_fdc14419c4124e::t_c25db12cc65713 164-166,168-175,177-179,185
+  s_fdc14419c4124e::t_c27a1dc2b1473f 167,176,181
+  s_fdc14419c4124e::t_8d05005ba66cc2 153
+exitmgr/transport_test.go
+  s_fdc14419c4124e::t_7e23c45725551c 8-9
+  s_fdc14419c4124e::t_575619a7862500 76,98-106,108,110
+  s_fdc14419c4124e::t_86f1352f60f0b2 4-5
+  s_fdc14419c4124e::t_d184f8ca617217 74-75,79-97,113-114
+  s_fdc14419c4124e::t_14e4bb74cec672 77,107,109,111-112
+  s_fdc14419c4124e::t_fb96ca42f9dacf 78
+README.md
+  s_fdc14419c4124e::t_796dc3d4b3ea97 92-93
+  s_fdc14419c4124e::t_4b58a9acd03543 510,513
+  s_fdc14419c4124e::t_a7920207e8a443 94-96
+  s_fdc14419c4124e::t_521534338cfa44 520
+  s_fdc14419c4124e::t_cba09c9ab7dcc6 512
+README.ru.md
+  s_fdc14419c4124e::t_ddeed6680fb04d 518,521
+  s_fdc14419c4124e::t_0279b8ab6c0bdc 101-103
+  s_fdc14419c4124e::t_aa17af0102f78f 528
+  s_fdc14419c4124e::t_f7cd21e4e2f5e3 98-100
+  s_fdc14419c4124e::t_9cbc55c4a9a6c1 520
+encryption_setup.go
+  s_fdc14419c4124e::t_82a2601a566542 54-55
+  s_fdc14419c4124e::t_61e1e2a55bd15d 23-24,26
+  s_fdc14419c4124e::t_4804c4d636bd51 102
+  s_fdc14419c4124e::t_70d5c64ef5e14a 107
+  s_fdc14419c4124e::t_376a92e9e71eff 40-41,46-53,56-57
+  s_fdc14419c4124e::t_5c915a211b0551 13-15
+  s_fdc14419c4124e::t_d42b47c3631f01 38
+  s_fdc14419c4124e::t_967fc4c31f67ff 39,58-66
+  s_fdc14419c4124e::t_2a5fd941d8b0ea 29-30,33-34
+  s_fdc14419c4124e::t_afe9a84c5aaa97 31-32
+exitmgr/transport.go
+  s_fdc14419c4124e::t_4e29b25ad37ddb 51,57,68-75,96-102
+  s_fdc14419c4124e::t_9a4e466cda20ea 23-25
+  s_fdc14419c4124e::t_a758b298e6ffb6 103-106
+  s_fdc14419c4124e::t_fe161cd3e64c32 67,76-84
+  s_fdc14419c4124e::t_f6bc138104dec5 60-64,66,87,94-95
+  s_fdc14419c4124e::t_d6281ed14a14ac 65
+  s_fdc14419c4124e::t_e9a5f6b34d3607 107-108
+main.go
+  s_fdc14419c4124e::t_996e0a6ffc64c7 116,120
+  s_fdc14419c4124e::t_773f4264eb5a69 411,417-419
+  s_fdc14419c4124e::t_301c84c319f060 584-603
+  s_fdc14419c4124e::t_b870d22441a5ca 217,224-226
+  s_fdc14419c4124e::t_a5c371ba6db387 221-223
+  s_fdc14419c4124e::t_b8ff3b300d4709 124-125
+  s_fdc14419c4124e::t_0ae8a408585a87 491-493,495-500,516-523,527-534
+  s_fdc14419c4124e::t_6aa98c6e0f4783 28-29
+  s_fdc14419c4124e::t_b541181be49b61 209-211
+  s_fdc14419c4124e::t_92ca2cbd4e0931 141-143
+  s_fdc14419c4124e::t_9498edfdcff870 494
+  s_fdc14419c4124e::t_86dbe8ace4b8ed 535-536
+transport/encrypted_v1_test.go
+  s_fdc14419c4124e::t_4acf33603c6eef 1-173
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e57f31efaca63d3ceaf352bb1f6653056ca0d218",
+  "prompts": {},
+  "sessions": {
+    "s_fdc14419c4124e": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f4a608ec2ffeoj39NPq2OHBxK1",
+        "model": "glm-5.3"
+      },
+      "human_author": "Pmmlabs <microreticulum@pmmlabs.ru>"
+    }
+  }
+}
