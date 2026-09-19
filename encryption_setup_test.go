@@ -88,7 +88,7 @@ func TestEncryptionSetupExitCreatesKeyAndAnnouncesIt(t *testing.T) {
 	if !strings.Contains(setup.banner, "--peer-key") {
 		t.Fatalf("banner %q does not tell the operator where the key goes", setup.banner)
 	}
-	wrapped, err := setup.wrap(nopTransport{}, pskOnlyTestContext)
+	wrapped, err := setup.wrap(nopTransport{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestEncryptionSetupClientUsesPeerKey(t *testing.T) {
 	if setup.banner != "" {
 		t.Fatalf("client has a banner: %q", setup.banner)
 	}
-	wrapped, err := setup.wrap(nopTransport{}, pskOnlyTestContext)
+	wrapped, err := setup.wrap(nopTransport{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,9 +125,9 @@ func TestEncryptionSetupPSKOnly(t *testing.T) {
 		if setup == nil {
 			t.Fatalf("initiator=%v: no setup for a PSK", initiator)
 		}
-		wrapped, err := setup.wrap(nopTransport{}, pskOnlyTestContext)
+		wrapped, err := setup.wrapOverCodec(nopTransport{}, pskOnlyTestContext)
 		if err != nil {
-			t.Fatalf("initiator=%v: wrap: %v", initiator, err)
+			t.Fatalf("initiator=%v: wrapOverCodec: %v", initiator, err)
 		}
 		if _, ok := wrapped.(*transport.PSKTransport); !ok {
 			t.Fatalf("initiator=%v: wrap returned %T, want *transport.PSKTransport", initiator, wrapped)

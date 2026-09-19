@@ -13,6 +13,10 @@ const addCancelBtn = document.getElementById("add-cancel-btn");
 const transportSelect = document.getElementById("f-transport");
 const urlGroup = document.getElementById("f-url-group");
 const maxGroup = document.getElementById("f-max-group");
+const cupsonlineNote = document.getElementById("f-cupsonline-note");
+const urlHint = document.getElementById("f-url-hint");
+
+const MULTISTREAM_TRANSPORTS = new Set(["yandex", "vyandex"]);
 const modalTitle = document.getElementById("add-modal-title");
 const submitBtn = document.getElementById("add-submit-btn");
 
@@ -110,12 +114,22 @@ logoutBtn.addEventListener("click", async () => {
 });
 
 function fieldsForTransport(t) {
+  cupsonlineNote.style.display = "none";
+  urlHint.style.display = "none";
   if (t === "oneme") {
     urlGroup.style.display = "none";
     maxGroup.style.display = "flex";
+  } else if (t === "cupsonline") {
+    // The exit generates its own rooms on start; cfg.url is ignored server
+    // side for cupsonline exit clients (unlike every other transport), so
+    // asking for one here would just be misleading.
+    urlGroup.style.display = "none";
+    maxGroup.style.display = "none";
+    cupsonlineNote.style.display = "block";
   } else {
     urlGroup.style.display = "flex";
     maxGroup.style.display = "none";
+    if (MULTISTREAM_TRANSPORTS.has(t)) urlHint.style.display = "block";
   }
 }
 transportSelect.addEventListener("change", () => fieldsForTransport(transportSelect.value));
@@ -236,9 +250,12 @@ function renderClient(c) {
   name.textContent = cfg.name || cfg.id;
   info.appendChild(name);
 
+  const docCount = (cfg.url || "").split(",").map((s) => s.trim()).filter(Boolean).length;
+
   const meta = document.createElement("div");
   meta.className = "client-meta";
   meta.textContent = `${transportLabel(cfg.transport)} · id: ${cfg.id}`;
+  if (docCount > 1) meta.textContent += ` · ${docCount} документа (multi-stream)`;
   if (cfg.psk_file) {
     const badge = document.createElement("span");
     badge.className = "psk-badge";
@@ -255,6 +272,16 @@ function renderClient(c) {
       `аптайм ${formatUptime(c.stats.UptimeSeconds)} · активных: ${c.stats.Established} · ретрансм.: ${c.stats.Retransmits}` +
       ` · ↑${formatBytes(c.bytes_sent)} ↓${formatBytes(c.bytes_received)}`;
     info.appendChild(stats);
+  }
+
+  if (c.cupsonline_rooms) {
+    const rooms = document.createElement("div");
+    rooms.className = "client-rooms";
+    rooms.append("URL для клиента (--url): ");
+    const code = document.createElement("code");
+    code.textContent = c.cupsonline_rooms;
+    rooms.appendChild(code);
+    info.appendChild(rooms);
   }
 
   if (c.error) {

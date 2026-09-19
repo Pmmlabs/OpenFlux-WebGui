@@ -17,11 +17,9 @@ import (
 	"openflux/netguard"
 	"openflux/panel"
 	"openflux/socks5"
+	"openflux/telegrambot"
 	"openflux/transport"
-	"openflux/transport/cupsonline"
-	"openflux/transport/mailru"
-	"openflux/transport/oneme"
-	"openflux/transport/yandex"
+	"openflux/transportstack"
 	"openflux/tunnel"
 	"openflux/tunnel/l3"
 	"openflux/utils"
@@ -34,6 +32,7 @@ var (
 	maxToken     string
 	maxUid       string
 	localIP      string
+	trafficEvery time.Duration
 )
 
 // expandShortFlags rewrites single-letter flag aliases into their long
@@ -128,6 +127,8 @@ func main() {
 		"Document URL. A comma-separated list (yandex, vyandex) runs the tunnel over several documents at once")
 	statusEvery := flag.Duration("multistream-status", 0,
 		"With several --url documents: log per-document state on this interval (e.g. 10s)")
+	trafficInterval := flag.Duration("traffic-stats", 0,
+		"Emit machine-readable cumulative transport traffic on this interval (e.g. 1s)")
 	flag.StringVar(&maxToken, "maxToken", "", "MAX Web token. If u use MAX transport")
 	flag.StringVar(&maxUid, "maxUid", "", "MAX call user id. If u use MAX transport")
 	socksAddr := flag.String("socks5", "127.0.0.1:1080", "SOCKS5 listen address (loopback by default; no authentication, so avoid exposing it)")
@@ -141,6 +142,8 @@ func main() {
 	panelKeyFile := flag.String("panel-key-file", "",
 		"--role=exit-panel: Noise static key file, created on first run. The public key is printed at startup; "+
 			"every client shares it. Turns client-tunnel encryption on; without it clients connect without --peer-key")
+	telegramBotToken := flag.String("telegram-bot-token", "", "--role=exit-panel: Telegram bot token for the admin bot (optional; from @BotFather)")
+	telegramAdminIDs := flag.String("telegram-admin-ids", "", "--role=exit-panel: comma-separated Telegram user ids allowed to use the bot (required if --telegram-bot-token is set)")
 
 	benchBytes := flag.Int("bench-bytes", 0, "Benchmark: push this many MB through the transport, then report and exit")
 	benchCompressible := flag.Bool("bench-compressible", false, "Benchmark: use compressible payload instead of random")
@@ -209,6 +212,11 @@ ADMIN PANEL  (only with --role=exit-panel; always l4, one tunnel per client)
                                public key is printed at startup; give it to
                                clients. Optional: without it client tunnels run
                                plaintext and no --peer-key is needed.
+      --telegram-bot-token=<t> Optional: run a Telegram admin bot alongside the
+                               panel (list/add/edit/remove/status/key from a phone,
+                               no SSH tunnel needed). Token from @BotFather.
+      --telegram-admin-ids=<ids> Comma-separated Telegram user ids allowed to use
+                               the bot. Required together with --telegram-bot-token.
 
 TRANSPORT MODIFIERS
   -c, --codec=batched          zstd + coalescing. Default.
@@ -245,6 +253,7 @@ DEPRECATED (removed in v2)
 
 	os.Args = expandShortFlags(os.Args)
 	flag.Parse()
+	trafficEvery = *trafficInterval
 
 	// Map deprecated flags to their new counterparts. New flags win over
 	// deprecated ones if both are supplied.
@@ -342,6 +351,11 @@ DEPRECATED (removed in v2)
 		if *panelUser == "" || *panelPass == "" {
 			log.Fatalf("--role=exit-panel requires --panel-user and --panel-pass")
 		}
+		if *telegramBotToken != "" {
+			if _, err := parseTelegramAdminIDs(*telegramAdminIDs); err != nil {
+				log.Fatalf("--telegram-admin-ids: %v", err)
+			}
+		}
 	case roleBenchSend, roleBenchSink:
 		// No ingress or exit mode.
 	default:
@@ -378,7 +392,7 @@ DEPRECATED (removed in v2)
 	}
 
 	if *role == roleExitPanel {
-		runExitPanel(*panelAddr, *panelUser, *panelPass, *panelData, *panelKeyFile)
+		runExitPanel(*panelAddr, *panelUser, *panelPass, *panelData, *panelKeyFile, *telegramBotToken, *telegramAdminIDs)
 		return
 	}
 
@@ -429,16 +443,33 @@ DEPRECATED (removed in v2)
 		log.Printf("Codec: legacy (per-packet LZ4, no batching)")
 	}
 
-	urls := splitURLs(globalDocUrl)
-	if len(urls) > 1 && !supportsMultiStream(*transportType) {
-		log.Fatalf("--url: several documents are supported with --transport=yandex or vyandex, not %s", *transportType)
+	// Exactly one of enc.wrap/enc.wrapOverCodec is set: the Noise v2
+	// transport sits under the codec, the PSK-only v1 transport over it
+	// (see encryptionSetup). transportstack.Build applies each at its
+	// layer, with the document URL as the PSK-only KDF context.
+	var encryptFn func(transport.Transport) (transport.Transport, error)
+	var encryptOverCodecFn func(transport.Transport, string) (transport.Transport, error)
+	if enc != nil {
+		encryptFn = enc.wrap
+		encryptOverCodecFn = enc.wrapOverCodec
 	}
-
-	// Every document gets a complete stream of its own (transport, encryption,
-	// codec), so each carries exactly the single-document wire format.
-	trans := newDocStreams(urls, func(docURL string) transport.Transport {
-		return newStream(*transportType, docURL, *role, *codec, enc, config)
-	})
+	trans, err := transportstack.Build(transportstack.Params{
+		TransportType:    *transportType,
+		URL:              globalDocUrl,
+		IsExit:           *role == roleExit,
+		MaxToken:         maxToken,
+		MaxUid:           maxUid,
+		Codec:            *codec,
+		Encrypt:          encryptFn,
+		EncryptOverCodec: encryptOverCodecFn,
+	}, config)
+	if err != nil {
+		log.Fatalf("transport: %v", err)
+	}
+	ms, isMultiStream := trans.(*transport.MultiStreamTransport)
+	if isMultiStream {
+		log.Printf("Multi-stream: %d documents", len(ms.Streams()))
+	}
 
 	// Benchmark modes run the transport directly with no tunnel / raw socket,
 	// so they never touch the host network.
@@ -454,8 +485,8 @@ DEPRECATED (removed in v2)
 		return
 	}
 
-	if ms, ok := trans.(*transport.MultiStreamTransport); ok && *statusEvery > 0 {
-		go multistreamStatusLoop(ms, urls, *statusEvery)
+	if isMultiStream && *statusEvery > 0 {
+		go multistreamStatusLoop(ms, transportstack.SplitURLs(globalDocUrl), *statusEvery)
 	}
 
 	switch *role {
@@ -466,72 +497,6 @@ DEPRECATED (removed in v2)
 	default:
 		log.Fatalf("unhandled role %q", *role)
 	}
-}
-
-// newStream builds the transport stack for one document: the raw transport,
-// optional encryption directly on it, and the app-layer codec outermost.
-func newStream(transportType, docURL, role, codec string, enc *encryptionSetup, config transport.TransportConfig) transport.Transport {
-	var inner transport.Transport
-	switch transportType {
-	case "vyandex":
-		inner = yandex.NewYandexVolgaTransport(docURL, config)
-	case "yandex":
-		inner = yandex.NewYandexDocsTransport(docURL, config)
-	case "oneme":
-		uidint, _ := strconv.ParseInt(maxUid, 10, 64)
-		inner = oneme.NewOneMeTransport(role == roleExit, maxToken, uidint, config)
-	case "cupsonline":
-		inner = cupsonline.NewCupsonlineTransport(docURL, config, role != roleExit)
-	case "mailru":
-		inner = mailru.NewMailruDocsTransport(docURL, config)
-	default:
-		log.Fatalf("Unknown transport type: %s", transportType)
-	}
-
-	// Encryption layering. The Noise v2 transport sits on the raw transport,
-	// under the codec, so one AEAD covers a whole compressed batch. The
-	// PSK-only transport instead wraps the codec, like the v1
-	// --encryption-key-file did (official repo): wire = batch(v1 frame),
-	// which is what old clients speak, so PSK-only stays cross-version
-	// compatible. The context (document URL, or the transport type) salts
-	// the PSK-only KDF; both peers derive it from the same
-	// --url/--transport.
-	if enc != nil && !enc.overCodec {
-		encrypted, err := enc.wrap(inner, streamContext(transportType, docURL))
-		if err != nil {
-			log.Fatalf("Configure encrypted transport: %v", err)
-		}
-		inner = encrypted
-	}
-
-	// App-layer codec. Default is the batching+zstd layer; --codec=legacy
-	// selects the old per-packet LZ4 path so the two can be compared over the
-	// same channel. Client and exit node must use the same one.
-	switch codec {
-	case codecBatched:
-		inner = transport.NewBatchedTransport(inner)
-	case codecLegacy:
-		inner = transport.NewCompressedTransport(inner)
-	}
-
-	if enc != nil && enc.overCodec {
-		encrypted, err := enc.wrap(inner, streamContext(transportType, docURL))
-		if err != nil {
-			log.Fatalf("Configure encrypted transport: %v", err)
-		}
-		inner = encrypted
-	}
-	return inner
-}
-
-// streamContext is the PSK-only KDF salt: the document URL when there is
-// one, otherwise the transport type. Both peers derive it from the same
-// --url/--transport, like the v1 --encryption-key-file did.
-func streamContext(transportType, docURL string) string {
-	if docURL != "" {
-		return docURL
-	}
-	return transportType
 }
 
 func runExit(trans transport.Transport, exitMode tunnel.ExitMode, upstreamProxy string) {
@@ -580,9 +545,32 @@ func runExit(trans transport.Transport, exitMode tunnel.ExitMode, upstreamProxy 
 // gets its own transport and its own independent L4 tunnel (see
 // exitmgr.Manager), managed live through a local, login-gated web panel
 // instead of one client per CLI invocation.
-func runExitPanel(addr, user, pass, dataPath, keyFile string) {
+// parseTelegramAdminIDs parses a comma-separated --telegram-admin-ids value.
+// At least one id is required: an empty whitelist would make isAdmin reject
+// everyone, which is indistinguishable from a silently broken bot.
+func parseTelegramAdminIDs(raw string) ([]int64, error) {
+	var ids []int64
+	for _, p := range strings.Split(raw, ",") {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		id, err := strconv.ParseInt(p, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid id %q: %w", p, err)
+		}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("at least one id is required (comma-separated Telegram user ids)")
+	}
+	return ids, nil
+}
+
+func runExitPanel(addr, user, pass, dataPath, keyFile, telegramBotToken, telegramAdminIDs string) {
 	// The panel's static key is opt-in: without --panel-key-file client
-	// tunnels run plaintext and clients connect without --peer-key.
+	// tunnels run plaintext (or PSK-only with a client psk_file) and
+	// clients connect without --peer-key.
 	var (
 		key noise.DHKey
 		pub string
@@ -615,6 +603,18 @@ func runExitPanel(addr, user, pass, dataPath, keyFile string) {
 	log.Printf("Running as EXIT NODE PANEL (l4, multi-client)")
 	log.Printf("Admin panel: http://%s (login required)", addr)
 
+	var botCancel context.CancelFunc
+	if telegramBotToken != "" {
+		adminIDs, err := parseTelegramAdminIDs(telegramAdminIDs)
+		if err != nil {
+			log.Fatalf("--telegram-admin-ids: %v", err)
+		}
+		bot := telegrambot.New(telegramBotToken, adminIDs, mgr, pub)
+		var botCtx context.Context
+		botCtx, botCancel = context.WithCancel(context.Background())
+		go bot.Run(botCtx)
+	}
+
 	errCh := make(chan error, 1)
 	go func() { errCh <- httpSrv.ListenAndServe() }()
 
@@ -628,6 +628,9 @@ func runExitPanel(addr, user, pass, dataPath, keyFile string) {
 	}
 
 	log.Printf("Shutting down panel...")
+	if botCancel != nil {
+		botCancel()
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := httpSrv.Shutdown(ctx); err != nil {
@@ -640,6 +643,16 @@ func runExitPanel(addr, user, pass, dataPath, keyFile string) {
 func startTransport(trans transport.Transport) {
 	if err := trans.Start(); err != nil {
 		log.Fatalf("Failed to start transport: %v", err)
+	}
+	if trafficEvery > 0 {
+		go func() {
+			ticker := time.NewTicker(trafficEvery)
+			defer ticker.Stop()
+			for range ticker.C {
+				s := trans.Stats()
+				log.Printf("[TRAFFIC] connected=%t tx=%d rx=%d", s.Connected, s.BytesSent, s.BytesReceived)
+			}
+		}()
 	}
 }
 

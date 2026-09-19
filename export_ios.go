@@ -160,25 +160,25 @@ func newBridgeDocStreams(transportType, docURL string, enc *encryptionSetup, con
 }
 
 // newBridgeStream stacks the optional encryption and the codec on a raw
-// transport, in the same order and with the same default codec as main.go,
-// so a phone talks to an exit node started with default flags. The PSK-only
-// transport wraps the codec (v1 layering) like main.go does; the Noise v2
-// transport sits under it.
+// transport, in the same order and with the same default codec as
+// transportstack.Build, so a phone talks to an exit node started with
+// default flags. The PSK-only transport wraps the codec (v1 layering); the
+// Noise v2 transport sits under it.
 func newBridgeStream(raw transport.Transport, transportType, docURL string, enc *encryptionSetup) (transport.Transport, error) {
 	context := transportType
 	if docURL != "" {
 		context = docURL
 	}
-	if enc != nil && !enc.overCodec {
+	if enc != nil && enc.wrap != nil {
 		var err error
-		if raw, err = enc.wrap(raw, context); err != nil {
+		if raw, err = enc.wrap(raw); err != nil {
 			return nil, err
 		}
 	}
 	raw = transport.NewBatchedTransport(raw)
-	if enc != nil && enc.overCodec {
+	if enc != nil && enc.wrapOverCodec != nil {
 		var err error
-		if raw, err = enc.wrap(raw, context); err != nil {
+		if raw, err = enc.wrapOverCodec(raw, context); err != nil {
 			return nil, err
 		}
 	}

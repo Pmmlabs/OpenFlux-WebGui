@@ -20,18 +20,18 @@ type encryptionOptions struct {
 }
 
 // encryptionSetup is a configured encryption layer ready to wrap raw
-// transports (one per document in a multi-stream tunnel). The context
-// string (the document URL or transport type) salts the PSK-only KDF.
+// transports (one per document in a multi-stream tunnel). Exactly one of
+// wrap/wrapOverCodec is set: wrap sits directly on the raw backend, under
+// the codec (the Noise v2 layering, wire = noise(batch)); wrapOverCodec
+// wraps the codec instead (the v1 layering, wire = batch(v1 frame), spoken
+// by old --encryption-key-file clients, so the PSK-only mode stays
+// cross-version compatible). The context string (the document URL or
+// transport type) salts the PSK-only KDF.
 type encryptionSetup struct {
-	wrap   func(transport.Transport, string) (transport.Transport, error)
-	label  string // one line for the startup log
-	banner string // exit node only: the public key to hand to clients
-	// overCodec is the v1 layering: the PSK-only transport wraps the codec
-	// (wire = batch(v1 frame)) instead of sitting under it like the Noise
-	// v2 transport (wire = noise(batch)). It is what official clients
-	// (--encryption-key-file) speak, so PSK-only keeps it
-	// for cross-version interop.
-	overCodec bool
+	wrap          func(transport.Transport) (transport.Transport, error)
+	wrapOverCodec func(transport.Transport, string) (transport.Transport, error)
+	label         string // one line for the startup log
+	banner        string // exit node only: the public key to hand to clients
 }
 
 // newEncryptionSetup validates the options for this side and prepares the
@@ -48,11 +48,10 @@ func newEncryptionSetup(opts encryptionOptions, initiator bool) (*encryptionSetu
 	}
 	if opts.ExitKeyFile == "" && opts.PeerKey == "" {
 		return &encryptionSetup{
-			wrap: func(inner transport.Transport, context string) (transport.Transport, error) {
+			wrapOverCodec: func(inner transport.Transport, context string) (transport.Transport, error) {
 				return transport.NewPSKTransport(inner, opts.PSK, context, initiator)
 			},
-			label:     "AES-256-GCM (PSK only, no handshake): both peers need the same --psk-file",
-			overCodec: true,
+			label: "AES-256-GCM (PSK only, no handshake): both peers need the same --psk-file",
 		}, nil
 	}
 	var psk []byte
@@ -104,7 +103,7 @@ func newEncryptionSetup(opts encryptionOptions, initiator bool) (*encryptionSetu
 	}
 
 	return &encryptionSetup{
-		wrap: func(inner transport.Transport, _ string) (transport.Transport, error) {
+		wrap: func(inner transport.Transport) (transport.Transport, error) {
 			return transport.NewEncryptedTransport(inner, cfg)
 		},
 		label:  label,
