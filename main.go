@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"openflux/exitmgr"
+	"openflux/netguard"
 	"openflux/panel"
 	"openflux/socks5"
 	"openflux/transport"
@@ -21,10 +22,11 @@ import (
 	"openflux/transport/mailru"
 	"openflux/transport/oneme"
 	"openflux/transport/yandex"
-	"openflux/netguard"
 	"openflux/tunnel"
 	"openflux/tunnel/l3"
 	"openflux/utils"
+
+	"github.com/flynn/noise"
 )
 
 var (
@@ -111,15 +113,16 @@ func main() {
 	codec := flag.String("codec", codecBatched, "batched (default, zstd+coalescing) or legacy (per-packet LZ4)")
 	exitKeyFile := flag.String("exit-key-file", "",
 		"Exit node: X25519 static key file for the encrypted transport, created on first run. "+
-			"The public key is printed at startup for clients")
+			"The public key is printed at startup for clients. Turns encryption on; without it the tunnel is plaintext")
 	peerKey := flag.String("peer-key", "",
 		"Client: the exit node's public key (from its startup banner). Turns the encrypted transport on")
 	allowPlaintext := flag.Bool("allow-plaintext", false,
-		"Run without encryption. UNSAFE: anyone with access to the document can read the traffic and use the exit node")
+		"Silence the plaintext-tunnel warning (encryption is opt-in; without keys the tunnel is plaintext anyway)")
 	allowPrivate := flag.Bool("allow-private", false,
 		"Exit: allow reaching private/loopback/link-local networks and cloud metadata (169.254.169.254). Off by default")
 	pskFile := flag.String("psk-file", "",
-		"Optional, both peers: file with a shared secret (16+ characters). The exit node then refuses clients without it")
+		"Both peers: file with a shared secret (16+ characters). Alone: AES-256-GCM PSK-only encryption, no key files needed; "+
+			"with --exit-key-file/--peer-key: additionally authorizes the client in the Noise handshake")
 
 	flag.StringVar(&globalDocUrl, "url", "http://#",
 		"Document URL. A comma-separated list (yandex, vyandex) runs the tunnel over several documents at once")
@@ -135,7 +138,9 @@ func main() {
 	panelUser := flag.String("panel-user", "", "--role=exit-panel: admin panel login username (required)")
 	panelPass := flag.String("panel-pass", "", "--role=exit-panel: admin panel login password (required)")
 	panelData := flag.String("panel-data", "openflux-clients.json", "--role=exit-panel: where registered clients are persisted")
-	panelKeyFile := flag.String("panel-key-file", "openflux-panel.key", "--role=exit-panel: Noise static key file, created on first run. The public key is printed at startup; every client shares it")
+	panelKeyFile := flag.String("panel-key-file", "",
+		"--role=exit-panel: Noise static key file, created on first run. The public key is printed at startup; "+
+			"every client shares it. Turns client-tunnel encryption on; without it clients connect without --peer-key")
 
 	benchBytes := flag.Int("bench-bytes", 0, "Benchmark: push this many MB through the transport, then report and exit")
 	benchCompressible := flag.Bool("bench-compressible", false, "Benchmark: use compressible payload instead of random")
@@ -201,20 +206,24 @@ ADMIN PANEL  (only with --role=exit-panel; always l4, one tunnel per client)
       --panel-pass=<pass>      Login password (required).
       --panel-data=<path>      Where registered clients are persisted (JSON).
       --panel-key-file=<path>  Noise static key file, created on first run. The
-                               public key is printed at startup; give it to clients.
+                               public key is printed at startup; give it to
+                               clients. Optional: without it client tunnels run
+                               plaintext and no --peer-key is needed.
 
 TRANSPORT MODIFIERS
   -c, --codec=batched          zstd + coalescing. Default.
   -c, --codec=legacy           Per-packet LZ4. A/B only.
 
-ENCRYPTION  (Noise NKpsk0: X25519 + AES-256-GCM, session keys rotate every 2 min)
+ENCRYPTION  (optional, Noise NKpsk0: X25519 + AES-256-GCM, session keys rotate every 2 min)
       --exit-key-file=<path>   Exit: static key file, created on first run. The public
                                key is printed at startup; give it to clients.
       --peer-key=<base64>      Client: the exit node's public key. Turns encryption on.
-      --psk-file=<path>        Both, optional: shared secret (16+ chars). The exit then
-                               refuses clients that do not have it.
-      --allow-plaintext        Run without encryption (unsafe; encryption is required
-                               otherwise).
+      --psk-file=<path>        Both: shared secret file (16+ chars). Alone it turns on the
+                               PSK-only mode (AES-256-GCM, no handshake, no key files);
+                               with the key flags above it also authorizes the client.
+      --allow-plaintext        Silence the plaintext warning. Without the key flags
+                               above the tunnel runs plaintext (unsafe: anyone who
+                               can read the document sees the traffic).
       --allow-private          Exit: permit private/loopback/link-local and cloud-metadata
                                destinations (blocked by default).
 
@@ -399,13 +408,15 @@ DEPRECATED (removed in v2)
 	}
 	initiator := *role == roleClient || *role == roleBenchSend
 	enc, err := newEncryptionSetup(encryptionOptions{
-		ExitKeyFile: *exitKeyFile, PeerKey: *peerKey, PSK: psk, AllowPlaintext: *allowPlaintext,
+		ExitKeyFile: *exitKeyFile, PeerKey: *peerKey, PSK: psk,
 	}, initiator)
 	if err != nil {
 		log.Fatalf("Encryption: %v", err)
 	}
 	if enc == nil {
-		log.Printf("WARNING: --allow-plaintext: the tunnel is NOT encrypted or authenticated")
+		if !*allowPlaintext {
+			log.Printf("WARNING: no --exit-key-file/--peer-key: the tunnel is NOT encrypted or authenticated")
+		}
 	} else {
 		log.Printf("Transport encryption: %s", enc.label)
 		fmt.Print(enc.banner)
@@ -477,10 +488,16 @@ func newStream(transportType, docURL, role, codec string, enc *encryptionSetup, 
 		log.Fatalf("Unknown transport type: %s", transportType)
 	}
 
-	// Optional encryption sits on the raw transport, under the codec, so one
-	// AEAD covers a whole compressed batch.
-	if enc != nil {
-		encrypted, err := enc.wrap(inner)
+	// Encryption layering. The Noise v2 transport sits on the raw transport,
+	// under the codec, so one AEAD covers a whole compressed batch. The
+	// PSK-only transport instead wraps the codec, like the v1
+	// --encryption-key-file did (official repo): wire = batch(v1 frame),
+	// which is what old clients speak, so PSK-only stays cross-version
+	// compatible. The context (document URL, or the transport type) salts
+	// the PSK-only KDF; both peers derive it from the same
+	// --url/--transport.
+	if enc != nil && !enc.overCodec {
+		encrypted, err := enc.wrap(inner, streamContext(transportType, docURL))
 		if err != nil {
 			log.Fatalf("Configure encrypted transport: %v", err)
 		}
@@ -496,7 +513,25 @@ func newStream(transportType, docURL, role, codec string, enc *encryptionSetup, 
 	case codecLegacy:
 		inner = transport.NewCompressedTransport(inner)
 	}
+
+	if enc != nil && enc.overCodec {
+		encrypted, err := enc.wrap(inner, streamContext(transportType, docURL))
+		if err != nil {
+			log.Fatalf("Configure encrypted transport: %v", err)
+		}
+		inner = encrypted
+	}
 	return inner
+}
+
+// streamContext is the PSK-only KDF salt: the document URL when there is
+// one, otherwise the transport type. Both peers derive it from the same
+// --url/--transport, like the v1 --encryption-key-file did.
+func streamContext(transportType, docURL string) string {
+	if docURL != "" {
+		return docURL
+	}
+	return transportType
 }
 
 func runExit(trans transport.Transport, exitMode tunnel.ExitMode, upstreamProxy string) {
@@ -546,16 +581,27 @@ func runExit(trans transport.Transport, exitMode tunnel.ExitMode, upstreamProxy 
 // exitmgr.Manager), managed live through a local, login-gated web panel
 // instead of one client per CLI invocation.
 func runExitPanel(addr, user, pass, dataPath, keyFile string) {
-	key, created, err := transport.LoadOrCreateStaticKey(keyFile)
-	if err != nil {
-		log.Fatalf("panel: static key: %v", err)
+	// The panel's static key is opt-in: without --panel-key-file client
+	// tunnels run plaintext and clients connect without --peer-key.
+	var (
+		key noise.DHKey
+		pub string
+	)
+	if keyFile != "" {
+		loaded, created, err := transport.LoadOrCreateStaticKey(keyFile)
+		if err != nil {
+			log.Fatalf("panel: static key: %v", err)
+		}
+		key = loaded
+		pub = transport.PublicKeyString(key.Public)
+		state := "loaded from"
+		if created {
+			state = "generated and saved to"
+		}
+		fmt.Printf("\n=== PANEL PUBLIC KEY (%s %s) ===\n%s\nStart clients with --peer-key=%s\n\n", state, keyFile, pub, pub)
+	} else {
+		log.Printf("Panel encryption: off (no --panel-key-file); clients connect without --peer-key")
 	}
-	pub := transport.PublicKeyString(key.Public)
-	state := "loaded from"
-	if created {
-		state = "generated and saved to"
-	}
-	fmt.Printf("\n=== PANEL PUBLIC KEY (%s %s) ===\n%s\nStart clients with --peer-key=%s\n\n", state, keyFile, pub, pub)
 
 	store := exitmgr.NewStore(dataPath)
 	mgr := exitmgr.NewManager(store, key)

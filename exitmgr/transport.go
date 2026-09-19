@@ -20,7 +20,9 @@ import (
 // wiring so a client added through the panel behaves identically to one
 // started via CLI flags. Every client shares the panel's own static key
 // (staticKey, loaded once by runExitPanel); cfg.PSKFile optionally closes
-// this one client to strangers who don't have the shared secret.
+// this one client to strangers who don't have the shared secret. A zero
+// staticKey (no --panel-key-file) leaves the tunnel plaintext, matching
+// the CLI's opt-in encryption.
 func BuildTransport(cfg ClientConfig, base transport.TransportConfig, staticKey noise.DHKey) (transport.Transport, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -46,36 +48,62 @@ func BuildTransport(cfg ClientConfig, base transport.TransportConfig, staticKey 
 		return nil, fmt.Errorf("unknown transport %q", cfg.Transport)
 	}
 
-	var psk []byte
+	var pskSecret string
 	if cfg.PSKFile != "" {
 		secretBytes, err := os.ReadFile(cfg.PSKFile)
 		if err != nil {
 			return nil, fmt.Errorf("read psk file: %w", err)
 		}
-		psk, err = transport.DerivePSK(strings.TrimSpace(string(secretBytes)))
-		if err != nil {
-			return nil, fmt.Errorf("psk file: %w", err)
+		pskSecret = strings.TrimSpace(string(secretBytes))
+	}
+
+	// Encryption layering, mirroring main.go. With a panel key
+	// (--panel-key-file) it is the Noise NKpsk0 transport sitting on the raw
+	// transport, under the codec: one AEAD covers a whole compressed batch.
+	// With only a client psk_file it is the PSK-only AES-256-GCM transport
+	// wrapping the codec instead (the v1 --encryption-key-file layering,
+	// wire = batch(v1 frame)), so official clients can interoperate
+	// and the PSK works without --panel-key-file.
+	if staticKey.Private != nil {
+		var psk []byte
+		if pskSecret != "" {
+			var err error
+			psk, err = transport.DerivePSK(pskSecret)
+			if err != nil {
+				return nil, fmt.Errorf("psk file: %w", err)
+			}
 		}
+		enc, err := transport.NewEncryptedTransport(inner, transport.EncryptedConfig{
+			Initiator: false,
+			StaticKey: staticKey,
+			PSK:       psk,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("configure encryption: %w", err)
+		}
+		inner = enc
 	}
 
-	// Encryption sits directly on the raw transport, under the codec, the
-	// same way main.go wires it: one AEAD covers a whole compressed batch,
-	// and the codec's batching means the peer sees one Noise frame per
-	// flushed batch instead of one per IP packet.
-	enc, err := transport.NewEncryptedTransport(inner, transport.EncryptedConfig{
-		Initiator: false,
-		StaticKey: staticKey,
-		PSK:       psk,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("configure encryption: %w", err)
-	}
-	inner = enc
-
+	// App-layer codec, the same default and layering as main.go.
 	if cfg.Codec == "legacy" {
 		inner = transport.NewCompressedTransport(inner)
 	} else {
 		inner = transport.NewBatchedTransport(inner)
+	}
+
+	// PSK-only sits over the codec (v1 layering), after it.
+	if staticKey.Private == nil && pskSecret != "" {
+		// The PSK-only KDF salt must match the client's, which derives it
+		// from its --url (or transport type), like the v1 flag did.
+		context := cfg.Transport
+		if cfg.URL != "" {
+			context = cfg.URL
+		}
+		enc, err := transport.NewPSKTransport(inner, pskSecret, context, false)
+		if err != nil {
+			return nil, fmt.Errorf("configure encryption: %w", err)
+		}
+		inner = enc
 	}
 
 	return inner, nil

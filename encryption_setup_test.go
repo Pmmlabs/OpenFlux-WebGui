@@ -12,6 +12,8 @@ import (
 // nopTransport is the bare minimum to wrap.
 type nopTransport struct{}
 
+const pskOnlyTestContext = "https://disk.yandex.com/i/test-doc"
+
 func (nopTransport) Start() error                    { return nil }
 func (nopTransport) Stop() error                     { return nil }
 func (nopTransport) Send([]byte) error               { return nil }
@@ -19,22 +21,15 @@ func (nopTransport) Receive(func([]byte))            {}
 func (nopTransport) IsConnected() bool               { return false }
 func (nopTransport) Stats() transport.TransportStats { return transport.TransportStats{} }
 
-func TestEncryptionSetupRequiredByDefault(t *testing.T) {
+// Encryption is opt-in: no options at all means plaintext, no error.
+func TestEncryptionSetupOffByDefault(t *testing.T) {
 	for _, initiator := range []bool{true, false} {
-		if _, err := newEncryptionSetup(encryptionOptions{}, initiator); err != errPlaintextNotAllowed {
-			t.Fatalf("initiator=%v: err = %v, want errPlaintextNotAllowed", initiator, err)
-		}
-	}
-}
-
-func TestEncryptionSetupOffWhenPlaintextAllowed(t *testing.T) {
-	for _, initiator := range []bool{true, false} {
-		setup, err := newEncryptionSetup(encryptionOptions{AllowPlaintext: true}, initiator)
+		setup, err := newEncryptionSetup(encryptionOptions{}, initiator)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("initiator=%v: err = %v, want nil", initiator, err)
 		}
 		if setup != nil {
-			t.Fatal("encryption configured without any flag")
+			t.Fatalf("initiator=%v: encryption configured without any flag", initiator)
 		}
 	}
 }
@@ -49,8 +44,6 @@ func TestEncryptionSetupRejectsMisplacedFlags(t *testing.T) {
 	}{
 		{"exit key on the client", encryptionOptions{ExitKeyFile: keyFile}, true, "--exit-key-file"},
 		{"peer key on the exit", encryptionOptions{PeerKey: "AAAA"}, false, "--peer-key"},
-		{"psk alone on the client", encryptionOptions{PSK: "a sufficiently long shared secret"}, true, "--peer-key"},
-		{"psk alone on the exit", encryptionOptions{PSK: "a sufficiently long shared secret"}, false, "--exit-key-file"},
 		{"bad peer key", encryptionOptions{PeerKey: "not a key"}, true, "peer key"},
 		{"short psk", encryptionOptions{PeerKey: validPeerKey(t), PSK: "short"}, true, "16"},
 	}
@@ -95,7 +88,7 @@ func TestEncryptionSetupExitCreatesKeyAndAnnouncesIt(t *testing.T) {
 	if !strings.Contains(setup.banner, "--peer-key") {
 		t.Fatalf("banner %q does not tell the operator where the key goes", setup.banner)
 	}
-	wrapped, err := setup.wrap(nopTransport{})
+	wrapped, err := setup.wrap(nopTransport{}, pskOnlyTestContext)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,12 +105,33 @@ func TestEncryptionSetupClientUsesPeerKey(t *testing.T) {
 	if setup.banner != "" {
 		t.Fatalf("client has a banner: %q", setup.banner)
 	}
-	wrapped, err := setup.wrap(nopTransport{})
+	wrapped, err := setup.wrap(nopTransport{}, pskOnlyTestContext)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := wrapped.(*transport.EncryptedTransport); !ok {
 		t.Fatalf("wrap returned %T", wrapped)
+	}
+}
+
+// A PSK without static keys selects the PSK-only mode: AES-256-GCM with no
+// handshake, on either side, with no key file or public key involved.
+func TestEncryptionSetupPSKOnly(t *testing.T) {
+	for _, initiator := range []bool{true, false} {
+		setup, err := newEncryptionSetup(encryptionOptions{PSK: "a sufficiently long shared secret"}, initiator)
+		if err != nil {
+			t.Fatalf("initiator=%v: %v", initiator, err)
+		}
+		if setup == nil {
+			t.Fatalf("initiator=%v: no setup for a PSK", initiator)
+		}
+		wrapped, err := setup.wrap(nopTransport{}, pskOnlyTestContext)
+		if err != nil {
+			t.Fatalf("initiator=%v: wrap: %v", initiator, err)
+		}
+		if _, ok := wrapped.(*transport.PSKTransport); !ok {
+			t.Fatalf("initiator=%v: wrap returned %T, want *transport.PSKTransport", initiator, wrapped)
+		}
 	}
 }
 

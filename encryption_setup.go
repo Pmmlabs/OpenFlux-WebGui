@@ -10,42 +10,60 @@ import (
 )
 
 // encryptionOptions are the encryption settings as given on the command
-// line or by the mobile bridge. All empty means plaintext.
+// line or by the mobile bridge. All empty means plaintext: encryption is
+// opt-in, turned on by --exit-key-file on the exit node and --peer-key on
+// the client.
 type encryptionOptions struct {
 	ExitKeyFile string // exit node: its static key file, created on first use
 	PeerKey     string // client: the exit node's public key (base64)
 	PSK         string // both, optional: the shared secret that closes the node to strangers
-	// AllowPlaintext permits running without encryption. Without it a missing
-	// key is an error: a plaintext tunnel lets anyone who can read or write
-	// the document see the traffic and use the exit node as an open proxy.
-	AllowPlaintext bool
 }
 
 // encryptionSetup is a configured encryption layer ready to wrap raw
-// transports (one per document in a multi-stream tunnel).
+// transports (one per document in a multi-stream tunnel). The context
+// string (the document URL or transport type) salts the PSK-only KDF.
 type encryptionSetup struct {
-	wrap   func(transport.Transport) (transport.Transport, error)
+	wrap   func(transport.Transport, string) (transport.Transport, error)
 	label  string // one line for the startup log
 	banner string // exit node only: the public key to hand to clients
+	// overCodec is the v1 layering: the PSK-only transport wraps the codec
+	// (wire = batch(v1 frame)) instead of sitting under it like the Noise
+	// v2 transport (wire = noise(batch)). It is what official clients
+	// (--encryption-key-file) speak, so PSK-only keeps it
+	// for cross-version interop.
+	overCodec bool
 }
 
-// errPlaintextNotAllowed is returned when no encryption option was given and
-// plaintext was not explicitly allowed.
-var errPlaintextNotAllowed = errors.New("encryption is required: use --exit-key-file on the exit node and " +
-	"--peer-key on the client (or --allow-plaintext to run an unprotected tunnel)")
-
 // newEncryptionSetup validates the options for this side and prepares the
-// layer. It returns nil, nil only when no encryption option was given and
-// plaintext is allowed. A secret alone is an error rather than silently
-// plaintext: the pre-v2 flag used to enable encryption by itself.
+// layer. It returns nil, nil when no encryption option was given: the tunnel
+// then runs plaintext (encryption is opt-in). A PSK without static keys
+// selects the PSK-only mode: the v1 AES-256-GCM transport with no handshake,
+// so neither side needs a key file.
 func newEncryptionSetup(opts encryptionOptions, initiator bool) (*encryptionSetup, error) {
 	if opts.ExitKeyFile == "" && opts.PeerKey == "" && opts.PSK == "" {
-		if !opts.AllowPlaintext {
-			return nil, errPlaintextNotAllowed
-		}
 		return nil, nil
 	}
-	cfg := transport.EncryptedConfig{Initiator: initiator}
+	if opts.PSK != "" && len(opts.PSK) < 16 {
+		return nil, fmt.Errorf("--psk-file: encryption secret must contain at least 16 characters")
+	}
+	if opts.ExitKeyFile == "" && opts.PeerKey == "" {
+		return &encryptionSetup{
+			wrap: func(inner transport.Transport, context string) (transport.Transport, error) {
+				return transport.NewPSKTransport(inner, opts.PSK, context, initiator)
+			},
+			label:     "AES-256-GCM (PSK only, no handshake): both peers need the same --psk-file",
+			overCodec: true,
+		}, nil
+	}
+	var psk []byte
+	if opts.PSK != "" {
+		var err error
+		psk, err = transport.DerivePSK(opts.PSK)
+		if err != nil {
+			return nil, fmt.Errorf("--psk-file: %w", err)
+		}
+	}
+	cfg := transport.EncryptedConfig{Initiator: initiator, PSK: psk}
 	var banner string
 	if initiator {
 		if opts.ExitKeyFile != "" {
@@ -81,17 +99,12 @@ func newEncryptionSetup(opts encryptionOptions, initiator bool) (*encryptionSetu
 	}
 
 	label := "Noise NKpsk0 (X25519 + AES-256-GCM), open node: any client with the public key may connect"
-	if opts.PSK != "" {
-		psk, err := transport.DerivePSK(opts.PSK)
-		if err != nil {
-			return nil, fmt.Errorf("--psk-file: %w", err)
-		}
-		cfg.PSK = psk
+	if psk != nil {
 		label = "Noise NKpsk0 (X25519 + AES-256-GCM), closed node: PSK required"
 	}
 
 	return &encryptionSetup{
-		wrap: func(inner transport.Transport) (transport.Transport, error) {
+		wrap: func(inner transport.Transport, _ string) (transport.Transport, error) {
 			return transport.NewEncryptedTransport(inner, cfg)
 		},
 		label:  label,

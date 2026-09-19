@@ -89,9 +89,11 @@ Changes on top of upstream:
 
 ## Architecture
 
-> **Encryption is required by default** (Noise `NKpsk0`): start the exit with
-> `--exit-key-file` and the client with `--peer-key`, or pass `--allow-plaintext`
-> to run an unprotected tunnel. All clients (desktop, iOS, Android) use the
+> **Encryption is optional** (Noise `NKpsk0`): without key flags the tunnel
+> runs plaintext. To encrypt, start the exit with `--exit-key-file` (the key
+> is created on first run) and the client with `--peer-key`; or share just a
+> `--psk-file` between both peers for the PSK-only mode (AES-256-GCM, no
+> handshake, no key files). All clients (desktop, iOS, Android) use the
 > **batched** codec and the same wire format.
 
 Any client works with either exit backend. `--mode` is chosen on the **exit
@@ -505,17 +507,17 @@ Measure raw goodput through the transport, without touching the host network:
 | `--upstream-proxy` | | | Upstream SOCKS5 proxy for exit node (forces l4, auto-detected from -s/--socks5) |
 | `--local-ip` | `-l` | (auto) | Egress IP for l3 SNAT / RST filter |
 | `--debug` | `-d` | `false` | Verbose per-packet logging |
-| `--exit-key-file` | | | Exit: static key file for the encrypted transport (created on first run) |
+| `--exit-key-file` | | | Exit: static key file for the encrypted transport (created on first run); turns encryption on |
 | `--peer-key` | | | Client: the exit node's public key; turns encryption on |
-| `--psk-file` | | | Both, optional: shared secret file (16+ chars) that closes the node |
-| `--allow-plaintext` | | `false` | Run without encryption (UNSAFE; encryption is required otherwise) |
+| `--psk-file` | | | Both, optional: shared secret file (16+ chars). Alone: PSK-only AES-256-GCM encryption; with keys: also authorizes the client |
+| `--allow-plaintext` | | `false` | Silence the plaintext-tunnel warning (no effect otherwise) |
 | `--allow-private` | | `false` | Exit: allow private/loopback/link-local and cloud-metadata destinations |
 | `--maxToken` | | | MAX auth token (`--transport=oneme`) |
 | `--maxUid` | | | MAX user id (`--transport=oneme`) |
 | `--panel-addr` | | `127.0.0.1:8088` | `--role=exit-panel` bind address |
 | `--panel-user` / `--panel-pass` | | | `--role=exit-panel` admin login (required) |
 | `--panel-data` | | `openflux-clients.json` | `--role=exit-panel` persisted client registry |
-| `--panel-key-file` | | `openflux-panel.key` | `--role=exit-panel` Noise static key, shared by every client |
+| `--panel-key-file` | | | `--role=exit-panel` Noise static key, shared by every client; optional — without it client tunnels run plaintext |
 | `--bench-bytes` | | `0` | MB to push (`--role=bench-send`) |
 | `--bench-compressible` | | `false` | Use compressible payload (bench) |
 

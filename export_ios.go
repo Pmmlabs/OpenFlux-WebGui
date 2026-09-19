@@ -150,7 +150,7 @@ func newBridgeDocStreams(transportType, docURL string, enc *encryptionSetup, con
 		} else {
 			raw = yandex.NewYandexDocsTransport(u, config)
 		}
-		s, err := newBridgeStream(raw, enc)
+		s, err := newBridgeStream(raw, transportType, u, enc)
 		if err != nil && firstErr == nil {
 			firstErr = err
 		}
@@ -161,15 +161,28 @@ func newBridgeDocStreams(transportType, docURL string, enc *encryptionSetup, con
 
 // newBridgeStream stacks the optional encryption and the codec on a raw
 // transport, in the same order and with the same default codec as main.go,
-// so a phone talks to an exit node started with default flags.
-func newBridgeStream(raw transport.Transport, enc *encryptionSetup) (transport.Transport, error) {
-	if enc != nil {
+// so a phone talks to an exit node started with default flags. The PSK-only
+// transport wraps the codec (v1 layering) like main.go does; the Noise v2
+// transport sits under it.
+func newBridgeStream(raw transport.Transport, transportType, docURL string, enc *encryptionSetup) (transport.Transport, error) {
+	context := transportType
+	if docURL != "" {
+		context = docURL
+	}
+	if enc != nil && !enc.overCodec {
 		var err error
-		if raw, err = enc.wrap(raw); err != nil {
+		if raw, err = enc.wrap(raw, context); err != nil {
 			return nil, err
 		}
 	}
-	return transport.NewBatchedTransport(raw), nil
+	raw = transport.NewBatchedTransport(raw)
+	if enc != nil && enc.overCodec {
+		var err error
+		if raw, err = enc.wrap(raw, context); err != nil {
+			return nil, err
+		}
+	}
+	return raw, nil
 }
 
 // OpenFluxStartClient starts the SOCKS5 client tunnel.

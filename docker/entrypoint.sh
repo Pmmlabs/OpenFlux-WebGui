@@ -46,8 +46,9 @@ fi
 [ -n "${LOCAL_IP:-}" ] && set -- "$@" --local-ip "$LOCAL_IP"
 [ -n "${UPSTREAM_PROXY:-}" ] && set -- "$@" --upstream-proxy "$UPSTREAM_PROXY"
 
-# Encryption (see README). The exit prints its public key at startup; put it
-# in the client's PEER_KEY. A missing key is a hard error unless ALLOW_PLAINTEXT.
+# Encryption is opt-in (see README). With a key the exit prints its public
+# key at startup; put it in the client's PEER_KEY. Without any key flags the
+# tunnel runs plaintext (ALLOW_PLAINTEXT only silences the warning).
 [ -n "${EXIT_KEY_FILE:-}" ] && set -- "$@" --exit-key-file "$EXIT_KEY_FILE"
 [ -n "${PEER_KEY:-}" ] && set -- "$@" --peer-key "$PEER_KEY"
 [ -n "${PSK_FILE:-}" ] && set -- "$@" --psk-file "$PSK_FILE"
