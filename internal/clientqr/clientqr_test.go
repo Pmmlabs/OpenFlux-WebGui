@@ -38,7 +38,8 @@ func TestBuildYandex(t *testing.T) {
 }
 
 // The import deep link carries the same JSON the QR encodes, base64-encoded
-// in the t parameter.
+// in the t parameter — URL-safe and unpadded, so the link never contains
+// / + = that break Android's intent-URI parsing.
 func TestImportLinkCarriesQRJSON(t *testing.T) {
 	status := exitmgr.ClientStatus{
 		Config: exitmgr.ClientConfig{ID: "abc123", Name: "phone", Transport: "yandex", URL: "https://docs.yandex.ru/x"},
@@ -55,9 +56,13 @@ func TestImportLinkCarriesQRJSON(t *testing.T) {
 	if !strings.HasPrefix(link, prefix) {
 		t.Fatalf("link = %q, want prefix %q", link, prefix)
 	}
-	decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(link, prefix))
+	payload := strings.TrimPrefix(link, prefix)
+	if strings.ContainsAny(payload, "/+=") {
+		t.Fatalf("t contains standard-base64 characters %q: Android would not open it", payload)
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(payload)
 	if err != nil {
-		t.Fatalf("t is not standard base64: %v", err)
+		t.Fatalf("t is not raw URL-safe base64: %v", err)
 	}
 	// The decoded payload must be the exact JSON the QR code carries.
 	qrJSON, err := json.Marshal(tun)
