@@ -90,6 +90,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PUT /api/clients/{id}", s.requireAuth(s.handleUpdateClient))
 	s.mux.HandleFunc("DELETE /api/clients/{id}", s.requireAuth(s.handleRemoveClient))
 	s.mux.HandleFunc("GET /api/clients/{id}/qr", s.requireAuth(s.handleClientQR))
+	s.mux.HandleFunc("GET /api/clients/{id}/qr-link", s.requireAuth(s.handleClientQRLink))
 
 	s.mux.HandleFunc("GET /api/yandex-doc-available", s.requireAuth(s.handleYandexDocAvailable))
 	s.mux.HandleFunc("POST /api/yandex-doc", s.requireAuth(s.handleGenerateYandexDoc))

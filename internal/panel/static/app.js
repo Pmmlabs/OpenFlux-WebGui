@@ -32,6 +32,7 @@ const qrModal = document.getElementById("qr-modal");
 const qrImage = document.getElementById("qr-image");
 const qrError = document.getElementById("qr-error");
 const qrCloseBtn = document.getElementById("qr-close-btn");
+const qrCopyLink = document.getElementById("qr-copy-link");
 
 const panelKeyValue = document.getElementById("panel-key-value");
 const panelKeyCopyBtn = document.getElementById("panel-key-copy");
@@ -301,12 +302,15 @@ addForm.addEventListener("submit", async (e) => {
 });
 
 let qrObjectURL = null;
+let qrLinkClientID = null;
 
 async function openQRModal(cfg) {
   qrError.textContent = "";
   qrImage.style.display = "none";
   qrModal.style.display = "flex";
   if (qrObjectURL) { URL.revokeObjectURL(qrObjectURL); qrObjectURL = null; }
+  qrLinkClientID = cfg.id;
+  qrCopyLink.textContent = "Скопировать ссылку";
 
   try {
     const res = await fetch(`/api/clients/${encodeURIComponent(cfg.id)}/qr`);
@@ -322,6 +326,46 @@ async function openQRModal(cfg) {
     qrError.textContent = "Не удалось получить QR: " + err.message;
   }
 }
+
+// copyToClipboard copies text via the async Clipboard API, falling back to a
+// temporary textarea + execCommand for non-secure contexts (plain http on a
+// non-localhost host), where navigator.clipboard is unavailable.
+async function copyToClipboard(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
+  try {
+    if (!document.execCommand("copy")) { throw new Error("copy command refused"); }
+  } finally {
+    document.body.removeChild(ta);
+  }
+}
+
+qrCopyLink.addEventListener("click", async (e) => {
+  e.preventDefault();
+  if (qrLinkClientID == null) { return; }
+  try {
+    const res = await fetch(`/api/clients/${encodeURIComponent(qrLinkClientID)}/qr-link`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error((body && body.error) || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    await copyToClipboard(data.url);
+    qrCopyLink.textContent = "✓ Скопировано";
+    setTimeout(() => { qrCopyLink.textContent = "Скопировать ссылку"; }, 1500);
+  } catch (err) {
+    qrError.textContent = "Не удалось скопировать ссылку: " + err.message;
+  }
+});
 
 function closeQRModal() {
   qrModal.style.display = "none";

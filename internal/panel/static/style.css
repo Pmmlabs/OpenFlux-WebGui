@@ -218,6 +218,14 @@ main { padding: 24px 28px; max-width: 900px; margin: 0 auto; }
   padding: 8px;
 }
 
+.qr-card #qr-copy-link {
+  color: var(--accent, #4f8cff);
+  font-size: 13px;
+  text-decoration: none;
+  cursor: pointer;
+}
+.qr-card #qr-copy-link:hover { text-decoration: underline; }
+
 .field-group { display: flex; flex-direction: column; gap: 12px; }
 
 .input-with-button { display: flex; gap: 8px; align-items: center; }

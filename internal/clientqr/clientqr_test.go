@@ -1,9 +1,11 @@
 package clientqr
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"openflux/internal/exitmgr"
@@ -32,6 +34,38 @@ func TestBuildYandex(t *testing.T) {
 	}
 	if tun.ID == 0 {
 		t.Fatal("id should be a nonzero derived value")
+	}
+}
+
+// The import deep link carries the same JSON the QR encodes, base64-encoded
+// in the t parameter.
+func TestImportLinkCarriesQRJSON(t *testing.T) {
+	status := exitmgr.ClientStatus{
+		Config: exitmgr.ClientConfig{ID: "abc123", Name: "phone", Transport: "yandex", URL: "https://docs.yandex.ru/x"},
+	}
+	tun, err := Build(status, "")
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	link, err := ImportLink(tun)
+	if err != nil {
+		t.Fatalf("ImportLink: %v", err)
+	}
+	const prefix = "openflux://import?t="
+	if !strings.HasPrefix(link, prefix) {
+		t.Fatalf("link = %q, want prefix %q", link, prefix)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(link, prefix))
+	if err != nil {
+		t.Fatalf("t is not standard base64: %v", err)
+	}
+	// The decoded payload must be the exact JSON the QR code carries.
+	qrJSON, err := json.Marshal(tun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(decoded) != string(qrJSON) {
+		t.Fatalf("decoded = %s, want QR JSON %s", decoded, qrJSON)
 	}
 }
 

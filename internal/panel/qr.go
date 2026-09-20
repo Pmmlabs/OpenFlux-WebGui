@@ -28,3 +28,26 @@ func (s *Server) handleClientQR(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Write(png)
 }
+
+// handleClientQRLink returns the openflux://import deep link carrying the
+// same JSON the QR code encodes, for the panel's "copy link" action.
+func (s *Server) handleClientQRLink(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	status, ok := s.mgr.Get(id)
+	if !ok {
+		writeJSONError(w, http.StatusNotFound, "client not found")
+		return
+	}
+
+	tun, err := clientqr.Build(status, s.publicKey)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	link, err := clientqr.ImportLink(tun)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"url": link})
+}

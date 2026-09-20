@@ -7,6 +7,7 @@
 package clientqr
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
@@ -96,6 +97,17 @@ func PNG(tun Tunnel, size int) ([]byte, error) {
 		return nil, fmt.Errorf("generate qr: %w", err)
 	}
 	return png, nil
+}
+
+// ImportLink marshals tun to the same JSON the QR code carries and wraps it
+// in the Android app's deep link, openflux://import?t=<base64 of the JSON>,
+// so the tunnel can be imported by opening a link instead of scanning.
+func ImportLink(tun Tunnel) (string, error) {
+	data, err := json.Marshal(tun)
+	if err != nil {
+		return "", fmt.Errorf("encode tunnel: %w", err)
+	}
+	return "openflux://import?t=" + base64.StdEncoding.EncodeToString(data), nil
 }
 
 // clientNumericID derives a stable positive int64 from the exit's hex
