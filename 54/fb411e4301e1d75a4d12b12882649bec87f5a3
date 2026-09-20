@@ -1,0 +1,16 @@
+internal/clientqr/clientqr.go
+  h_4bfcd31e5ba605 105-107,113
+internal/clientqr/clientqr_test.go
+  h_4bfcd31e5ba605 41-42,59-63,65
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "54fb411e4301e1d75a4d12b12882649bec87f5a3",
+  "prompts": {},
+  "humans": {
+    "h_4bfcd31e5ba605": {
+      "author": "Pmmlabs <microreticulum@pmmlabs.ru>"
+    }
+  }
+}
