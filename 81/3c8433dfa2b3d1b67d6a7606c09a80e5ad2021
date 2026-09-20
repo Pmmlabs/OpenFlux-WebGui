@@ -1,0 +1,36 @@
+internal/panel/static/style.css
+  s_fdc14419c4124e::t_e5c9fa03c6429b 221-228
+internal/panel/static/app.js
+  s_fdc14419c4124e::t_d52686e3251221 305,312-313,330-368
+  s_fdc14419c4124e::t_77552473eb36bf 35
+  s_fdc14419c4124e::t_a9ebbc5b24c784 369
+internal/panel/static/index.html
+  s_fdc14419c4124e::t_f9087dab2e77c0 134
+internal/panel/qr.go
+  s_fdc14419c4124e::t_3b68675e628fd9 31-51,53
+  s_fdc14419c4124e::t_c5d6a9ad224865 52
+internal/panel/server.go
+  s_fdc14419c4124e::t_c37267568f9697 93
+internal/clientqr/clientqr.go
+  s_fdc14419c4124e::t_5b883deab44ba1 102-112
+  s_fdc14419c4124e::t_3d9a6e0d34ec62 10
+internal/clientqr/clientqr_test.go
+  s_fdc14419c4124e::t_104b0094413f65 4,8
+  s_fdc14419c4124e::t_83700d7f689c48 40-71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "813c8433dfa2b3d1b67d6a7606c09a80e5ad2021",
+  "prompts": {},
+  "sessions": {
+    "s_fdc14419c4124e": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f4a608ec2ffeoj39NPq2OHBxK1",
+        "model": "glm-5.3"
+      },
+      "human_author": "Pmmlabs <microreticulum@pmmlabs.ru>"
+    }
+  }
+}
