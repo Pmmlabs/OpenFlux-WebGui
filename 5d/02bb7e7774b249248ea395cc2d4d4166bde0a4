@@ -1,0 +1,24 @@
+internal/transport/yandex/boards.go
+  h_4bfcd31e5ba605 1-1068
+internal/transport/yandex/captcha.go
+  h_4bfcd31e5ba605 1-357
+internal/transport/yandex/vyandex.go
+  h_4bfcd31e5ba605 160,178-183,189-199,208
+internal/transport/yandex/yandex.go
+  h_4bfcd31e5ba605 15,647,649-650,652,657-718,724-725,731-733,741-742
+main.go
+  h_4bfcd31e5ba605 1-447
+signals_unix.go
+  h_4bfcd31e5ba605 1-16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5d02bb7e7774b249248ea395cc2d4d4166bde0a4",
+  "prompts": {},
+  "humans": {
+    "h_4bfcd31e5ba605": {
+      "author": "Pmmlabs <microreticulum@pmmlabs.ru>"
+    }
+  }
+}
