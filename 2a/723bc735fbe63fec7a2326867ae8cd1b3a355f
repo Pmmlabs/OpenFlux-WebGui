@@ -1,0 +1,16 @@
+internal/transport/yandex/boards.go
+  h_4bfcd31e5ba605 23-24,28-29,729-731,881-882,885-886
+internal/transport/yandex/captcha.go
+  h_4bfcd31e5ba605 18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2a723bc735fbe63fec7a2326867ae8cd1b3a355f",
+  "prompts": {},
+  "humans": {
+    "h_4bfcd31e5ba605": {
+      "author": "Pmmlabs <microreticulum@pmmlabs.ru>"
+    }
+  }
+}
