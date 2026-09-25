@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"runtime"
 	godebug "runtime/debug"
 	"strconv"
@@ -94,6 +95,9 @@ func main() {
 	encryptionKeyFile := flag.String("encryption-key-file", "",
 		"Optional: encrypt the transport with AES-256-GCM using a shared secret read from this file. "+
 			"Both peers must use the same secret; unset means unencrypted, unchanged behavior")
+	cookieFile := flag.String("cookie-file", "",
+		"Optional: persist the captcha-passed cookie session to this file so restarts skip the captcha "+
+			"(each solve burns IP reputation). Yandex Docs transport only")
 
 	flag.StringVar(&globalDocUrl, "url", "http://#", "Document URL. If u use Yandex.Docs transport")
 	flag.StringVar(&maxToken, "maxToken", "", "MAX Web token. If u use MAX transport")
@@ -279,11 +283,12 @@ DEPRECATED (removed in v2)
 	}
 
 	config := transport.DefaultConfig()
+	config.CookieFile = resolveCookieFile(*cookieFile)
 	var inner transport.Transport
 
 	switch *transportType {
-        case "boards":
-    		inner = yandex.NewBoardsTransport(globalDocUrl, config)
+	case "boards":
+		inner = yandex.NewBoardsTransport(globalDocUrl, config)
 	case "vyandex":
 		inner = yandex.NewYandexVolgaTransport(globalDocUrl, config)
 	case "yandex":
@@ -444,4 +449,27 @@ func runClientTUN(trans transport.Transport) {
 	tc.RestoreDefault()
 	log.Printf("Shutdown complete")
 	os.Exit(0)
+}
+
+// resolveCookieFile picks where to persist the captcha-passed cookie session.
+// An explicit --cookie-file wins. Otherwise the first writable location of
+// TMPDIR (on Android that is the app's private cache dir; on desktop/server
+// /tmp or /var/folders/...) and the working directory (on Android the app's
+// filesDir, since the process is spawned with cwd=filesDir) is used. Returns
+// "" when nothing is writable: cookie reuse then stays in-memory only.
+func resolveCookieFile(explicit string) string {
+	if explicit != "" {
+		return explicit
+	}
+	for _, dir := range []string{os.TempDir(), "."} {
+		p := filepath.Join(dir, "openflux-cookies.json")
+		f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY, 0o600)
+		if err == nil {
+			f.Close()
+			log.Printf("Cookie session file: %s", p)
+			return p
+		}
+	}
+	log.Printf("Cookie session file: none (no writable directory found)")
+	return ""
 }

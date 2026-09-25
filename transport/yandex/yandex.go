@@ -8,7 +8,6 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
-	"net/http/cookiejar"
 	"regexp"
 	"strings"
 	"sync"
@@ -59,8 +58,13 @@ func (s *DocSession) safeWrite(messageType int, data []byte) error {
 type YandexDocsTransport struct {
 	*transport.BaseTransport
 
-	url      string
-	session  *DocSession
+	url     string
+	session *DocSession
+	// jar is shared across reconnects so a captcha-passed session is
+	// reused instead of re-solving the captcha on every connect (each
+	// solve burns IP reputation; ~40 solves trigger the unsolvable
+	// silhouette escalation).
+	jar *persistJar
 
 	userCounter atomic.Int32
 	baseUserID  string
@@ -70,11 +74,11 @@ func NewYandexDocsTransport(url string, config transport.TransportConfig) *Yande
 	t := &YandexDocsTransport{
 		BaseTransport: transport.NewBaseTransport(config),
 		url:           url,
+		jar:           newPersistJar(config.CookieFile),
 	}
 	t.baseUserID = randUserID()
 	return t
 }
-
 
 func (t *YandexDocsTransport) Start() error {
 	if err := t.BaseTransport.Start(); err != nil {
@@ -138,6 +142,15 @@ func (t *YandexDocsTransport) connectToDoc(attempt int) {
 		info, err := t.fetchDocInfo(t.url, userID)
 		if err != nil {
 			utils.Debugf("[YDOCS] fetchDocInfo failed: %v", err)
+			// Серьёзная эскалация капчи: IP помечен ботным, флаг распадается
+			// медленно. Для предотвращения жжения репутации - пауза 30 минут.
+			if strings.Contains(err.Error(), "escalated to silhouette") {
+				utils.Debugf("[YDOCS] bot-flagged: cooling down 30m before next attempt")
+				time.Sleep(30 * time.Minute)
+				if !t.IsRunning() {
+					return
+				}
+			}
 			t.scheduleReconnect(attempt)
 			return
 		}
@@ -399,24 +412,30 @@ func reconnectBackoff(n int) time.Duration {
 }
 
 func (t *YandexDocsTransport) fetchDocInfo(url, userID string) (YandexDocsInfo, error) {
-	jar, _ := cookiejar.New(nil)
-	client := &http.Client{
-		Jar: jar,
-		// НЕ следуем редиректам автоматически — обрабатываем вручную.
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-		Timeout: 15 * time.Second,
+	// Reuse the transport-wide jar: cookies from a previously solved
+	// captcha make Yandex skip the captcha on reconnects entirely.
+	jar := t.jar
+	if jar == nil { // zero-value transport (tests)
+		jar = newPersistJar("")
 	}
+	// Браузерный TLS-фингерпринт: с обычным Go-клиентом Яндекс-антибот
+	// после первой капчи присылает вторую (checkbox), см. browserclient.go.
+	client := newBrowserHTTPClient(jar, 15*time.Second)
 
-	ua := "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:153.0) Gecko/20100101 Firefox/153.0"
+	ua := browserUserAgent
 
-	// Явно следуем по редиректам: до 10 хопов.
+	// Явно следуем по редиректам (капчи удлиняют цепочку).
 	currentURL := url
 	var resp *http.Response
 	var err error
 
-	for hop := 0; hop < 10; hop++ {
+	// Счётчик подряд идущих эскалаций до силуэтной капчи. Один 7.73 в
+	// retpath — не приговор: ретрай оригинального URL часто проходит без
+	// капчи. Подряд несколько — сессия/IP реально
+	// помечены ботными, дальше сабмитить бессмысленно и вредно.
+	escalations := 0
+
+	for hop := 0; hop < 20; hop++ {
 		utils.Debugf("[YDOCS] hop %d: GET %s", hop, shortStr(currentURL, 120))
 
 		req, _ := http.NewRequest("GET", currentURL, nil)
@@ -451,6 +470,35 @@ func (t *YandexDocsTransport) fetchDocInfo(url, userID string) (YandexDocsInfo, 
 					return YandexDocsInfo{}, fmt.Errorf("captcha solve: %w", cerr)
 				}
 				utils.Debugf("[YDOCS] captcha solved, retrying original url")
+				currentURL = url
+				continue
+			}
+
+			// Вторая, «checkbox»-капча (showcaptcha?cc=1) — тоже проходим.
+			// Важно: после showcaptchafast (строка выше), т.к. "showcaptchafast"
+			// содержит "showcaptcha" как подстроку.
+			if strings.Contains(loc, "showcaptcha") {
+				utils.Debugf("[YDOCS] checkbox captcha detected, solving...")
+				retpath, cerr := solveCheckboxCaptcha(loc, jar, ua)
+				if cerr != nil {
+					return YandexDocsInfo{}, fmt.Errorf("checkbox captcha solve: %w", cerr)
+				}
+				// Эскалация до силуэтной капчи (form-fb-hint=7.73).
+				// Единичный случай — продолжаем (ретрай может пройти);
+				// несколько подряд — сессия/IP помечены ботными:
+				// выходим, cookies отравлены, начинаем с чистого листа.
+				if strings.Contains(retpath, "form-fb-hint=7.73") {
+					escalations++
+					if escalations >= 3 {
+						jar.Clear()
+						return YandexDocsInfo{}, fmt.Errorf("captcha escalated to silhouette %d times (bot-flagged session/IP)", escalations)
+					}
+					utils.Debugf("[YDOCS] silhouette escalation #%d, retrying original url", escalations)
+					currentURL = url
+					continue
+				}
+				escalations = 0
+				utils.Debugf("[YDOCS] checkbox captcha solved, retrying original url")
 				currentURL = url
 				continue
 			}
@@ -538,6 +586,10 @@ func (t *YandexDocsTransport) fetchDocInfo(url, userID string) (YandexDocsInfo, 
 		perms = make(map[string]interface{})
 	}
 
+	// Session reached the doc: the cookie set is trusted now. Persist it so
+	// restarts/reconnects skip the captcha (each solve burns IP reputation).
+	jar.Save()
+
 	return YandexDocsInfo{
 		CookieStr:   strings.Join(cookies, "; "),
 		Token:       token,
@@ -557,7 +609,6 @@ func (t *YandexDocsTransport) fetchDocInfo(url, userID string) (YandexDocsInfo, 
 		},
 	}, nil
 }
-
 
 func randUserID() string {
 	return fmt.Sprintf("%010d", rand.New(rand.NewSource(time.Now().UnixNano())).Intn(1000000000))

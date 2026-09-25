@@ -27,16 +27,10 @@ func solveCaptcha(docURL string, jar http.CookieJar, userAgent string) (string, 
 		return "", fmt.Errorf("captcha: nil cookiejar")
 	}
 	if userAgent == "" {
-		userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:153.0) Gecko/20100101 Firefox/153.0"
+		userAgent = browserUserAgent
 	}
 
-	client := &http.Client{
-		Jar:     jar,
-		Timeout: 30 * time.Second,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
+	client := newBrowserHTTPClient(jar, 30*time.Second)
 
 	utils.Debugf("[CAPTCHA] solve start: url=%s", docURL)
 
@@ -100,6 +94,10 @@ func solveCaptcha(docURL string, jar http.CookieJar, userAgent string) (string, 
 	if err != nil {
 		return "", err
 	}
+
+	// Metrika-маяки страницы капчи: браузер отправляет их при рендере,
+	// бэкенд сверяет watch-хит с unique_key с сессией капчи (см. metrika.go).
+	sendMetrikaBeacons(jar, captchaURL, ssr.UniqueKey, pageTitleHTML(string(body)), userAgent)
 	utils.Debugf("[CAPTCHA] uniqueKey=%s timestamp=%d complexity=%d prefix=%s",
 		ssr.UniqueKey, ssr.Timestamp, ssr.Pow.Complexity, shortStr(ssr.Pow.Prefix, 32))
 
@@ -147,6 +145,299 @@ func solveCaptcha(docURL string, jar http.CookieJar, userAgent string) (string, 
 
 	utils.Debugf("[CAPTCHA] solve OK, retpath=%s", shortStr(retpath, 120))
 	return retpath, nil
+}
+
+// solveCheckboxCaptcha проходит «checkbox»-капчу Яндекса (showcaptcha?cc=1,
+// страница «Я не робот»). В отличие от showcaptchafast, здесь проверка
+// строится на PoW (pdata) + поведенческой телеметрии (tdata).
+//
+// Возвращает retpath из ответа (может быть пустым). Cookies в jar
+// обновляются на месте.
+func solveCheckboxCaptcha(captchaURL string, jar http.CookieJar, userAgent string) (string, error) {
+	if jar == nil {
+		return "", fmt.Errorf("checkbox captcha: nil cookiejar")
+	}
+	if userAgent == "" {
+		userAgent = browserUserAgent
+	}
+
+	client := newBrowserHTTPClient(jar, 30*time.Second)
+
+	utils.Debugf("[CHECKBOX] solve start: url=%s", shortStr(captchaURL, 120))
+
+	req, _ := http.NewRequest("GET", captchaURL, nil)
+	setBrowserHeaders(req, userAgent)
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("checkbox captcha GET: %w", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("checkbox captcha status %d", resp.StatusCode)
+	}
+	utils.Debugf("[CHECKBOX] page: %d bytes", len(body))
+
+	// Браузер, отрендерив страницу, тут же тянет её подресурсы
+	// (captcha_smart*.js, metrika, adfstat-пиксель с тем же
+	// unique_key). Бэкенд капчи коррелирует эти запросы — без них сабмит
+	// выглядит ботным, поэтому забираем их тоже.
+	fetchCheckboxSubresources(client, string(body), captchaURL, userAgent)
+
+	ssr, err := parseCheckboxSSR(string(body))
+	if err != nil {
+		return "", err
+	}
+	utils.Debugf("[CHECKBOX] powComplexity=%d powPrefix=%s",
+		ssr.PowComplexity, shortStr(ssr.PowPrefix, 48))
+
+	// Metrika-маяки: настоящий браузер отправляет watch-хиты для страницы
+	// капчи — бэкенд Яндекса сверяет watch-хит с unique_key с сессией капчи.
+	sendMetrikaBeacons(jar, captchaURL, ssr.UniqueKey, pageTitleHTML(string(body)), userAgent)
+
+	t0 := time.Now()
+	nonceHex, calcMs := solveCheckboxPoW(ssr.PowPrefix, ssr.PowComplexity)
+	if nonceHex == "" {
+		return "", fmt.Errorf("checkbox captcha: PoW not solved")
+	}
+	// Реальный браузер считает PoW в JS-воркере заметно дольше Go;
+	// слишком маленькое время — бот-сигнал, поэтому нормализуем.
+	if calcMs < 80 {
+		calcMs = 80 + int64(rand.Intn(420))
+	}
+	utils.Debugf("[CHECKBOX] PoW solved: nonce=%s time=%v", shortStr(nonceHex, 32), time.Since(t0))
+
+	pdata := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf(
+		`{"powNonce":"%s","powCalcTime":%d,"powPrefix":"%s"}`,
+		nonceHex, calcMs, ssr.PowPrefix)))
+	tdata, trackMs := encodeCheckboxTrackData()
+
+	// rdata: отпечаток greed.js, выполненного в JS-ранчере с cookies
+	// текущей сессии — только так получается валидное шифрование
+	// сессионным ключом (см. greedvm.go).
+	rdata, err := buildGreedRdata(client, jar, captchaURL, userAgent)
+	if err != nil {
+		// Fallback на статический шаблон — заведомо хуже, но позволяет
+		// хотя бы отправить сабмит.
+		utils.Debugf("[CHECKBOX] greed vm failed: %v (falling back to template)", err)
+		rdata = base64.StdEncoding.EncodeToString([]byte(greedFingerprintTemplate))
+	}
+
+	// picasso: canvas-хэши. Сервер не сверяет результаты (проверено
+	// живым тестом), но структура полей должна присутствовать.
+	picasso := encodePicassoField(string(body))
+
+	// Держим паузу, соответствующую таймлайну tdata: сервер сверяет
+	// интервал между выдачей страницы и сабмитом с заявленной телеметрией.
+	if wait := trackMs - time.Since(t0).Milliseconds(); wait > 0 {
+		time.Sleep(time.Duration(wait) * time.Millisecond)
+	}
+
+	form := url.Values{}
+	form.Set("rdata", rdata)
+	form.Set("pdata", pdata)
+	form.Set("tdata", tdata)
+	form.Set("picasso", picasso)
+
+	formAction := ssr.FormAction
+	if strings.HasPrefix(formAction, "/") {
+		if u, perr := url.Parse(captchaURL); perr == nil {
+			formAction = u.Scheme + "://" + u.Host + formAction
+		}
+	}
+
+	utils.Debugf("[CHECKBOX] POST %s", shortStr(formAction, 100))
+	req2, _ := http.NewRequest("POST", formAction, strings.NewReader(form.Encode()))
+	setBrowserHeaders(req2, userAgent)
+	req2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	// Сабмит формы — навигация с той же страницы, не внешний переход.
+	req2.Header.Set("Sec-Fetch-Site", "same-origin")
+	req2.Header.Set("Sec-Fetch-Mode", "navigate")
+	req2.Header.Set("Sec-Fetch-Dest", "document")
+	req2.Header.Set("Sec-Fetch-User", "?1")
+	if u, perr := url.Parse(captchaURL); perr == nil {
+		req2.Header.Set("Origin", u.Scheme+"://"+u.Host)
+	}
+	req2.Header.Set("Referer", captchaURL)
+
+	resp2, err := client.Do(req2)
+	if err != nil {
+		return "", fmt.Errorf("checkbox captcha POST: %w", err)
+	}
+	io.Copy(io.Discard, resp2.Body)
+	resp2.Body.Close()
+
+	utils.Debugf("[CHECKBOX] POST result: status=%d location=%s",
+		resp2.StatusCode, shortStr(resp2.Header.Get("Location"), 120))
+
+	if resp2.StatusCode < 300 || resp2.StatusCode >= 400 {
+		return "", fmt.Errorf("checkbox captcha POST unexpected status %d", resp2.StatusCode)
+	}
+
+	retpath := resp2.Header.Get("Location")
+	utils.Debugf("[CHECKBOX] solve OK, retpath=%s", shortStr(retpath, 120))
+	return retpath, nil
+}
+
+var (
+	reSubresourceSrc = regexp.MustCompile(`(?:<script[^>]*src|<img[^>]*src)="([^"]+)"`)
+	reMetrikaLoader  = regexp.MustCompile(`n\.src="([^"]+)"`)
+)
+
+// fetchCheckboxSubresources забирает скрипты и пиксели страницы капчи,
+// как это делает настоящий браузер.
+func fetchCheckboxSubresources(client *http.Client, html, pageURL, userAgent string) {
+	base, err := url.Parse(pageURL)
+	if err != nil {
+		return
+	}
+	seen := map[string]bool{}
+	var urls []string
+	for _, re := range []*regexp.Regexp{reSubresourceSrc, reMetrikaLoader} {
+		for _, m := range re.FindAllStringSubmatch(html, -1) {
+			if u, perr := url.Parse(m[1]); perr == nil {
+				urls = append(urls, base.ResolveReference(u).String())
+			}
+		}
+	}
+	for _, u := range urls {
+		if seen[u] {
+			continue
+		}
+		seen[u] = true
+		req, _ := http.NewRequest("GET", u, nil)
+		setBrowserHeaders(req, userAgent)
+		req.Header.Set("Referer", pageURL)
+		req.Header.Set("Sec-Fetch-Dest", "script")
+		req.Header.Set("Sec-Fetch-Mode", "no-cors")
+		req.Header.Set("Sec-Fetch-Site", "cross-site")
+		if resp, err := client.Do(req); err == nil {
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+		}
+	}
+	utils.Debugf("[CHECKBOX] fetched %d subresources", len(seen))
+}
+
+// pageTitleHTML — <title> страницы капчи (уходит в browser-info метрики).
+func pageTitleHTML(html string) string {
+	m := regexp.MustCompile(`<title>([^<]*)</title>`).FindStringSubmatch(html)
+	if len(m) < 2 || m[1] == "" {
+		return "Верификация"
+	}
+	return m[1]
+}
+
+// checkboxSSR — поля window.__SSR_DATA__ со страницы checkbox-капчи.
+type checkboxSSR struct {
+	FormAction    string
+	PowPrefix     string
+	PowComplexity int
+	UniqueKey     string
+}
+
+var (
+	reSSRFormAction    = regexp.MustCompile(`formAction:"([^"]*)"`)
+	reSSRPowPrefix     = regexp.MustCompile(`powPrefix:"([^"]*)"`)
+	reSSRPowComplexity = regexp.MustCompile(`powComplexity:"?(\d+)"?`)
+	reSSRUniqueKey     = regexp.MustCompile(`uniqueKey:"([^"]*)"`)
+)
+
+func parseCheckboxSSR(html string) (*checkboxSSR, error) {
+	if !strings.Contains(html, "__SSR_DATA__") {
+		return nil, fmt.Errorf("checkbox captcha: __SSR_DATA__ not found")
+	}
+	m := reSSRFormAction.FindStringSubmatch(html)
+	if len(m) < 2 || m[1] == "" {
+		return nil, fmt.Errorf("checkbox captcha: formAction not found")
+	}
+	ssr := &checkboxSSR{FormAction: strings.ReplaceAll(m[1], `\u0026`, "&")}
+	if m := reSSRPowPrefix.FindStringSubmatch(html); len(m) > 1 {
+		ssr.PowPrefix = m[1]
+	}
+	if m := reSSRPowComplexity.FindStringSubmatch(html); len(m) > 1 {
+		fmt.Sscanf(m[1], "%d", &ssr.PowComplexity)
+	}
+	if m := reSSRUniqueKey.FindStringSubmatch(html); len(m) > 1 {
+		ssr.UniqueKey = m[1]
+	}
+	if ssr.PowPrefix == "" || ssr.PowComplexity <= 0 {
+		return nil, fmt.Errorf("checkbox captcha: pow params not found")
+	}
+	return ssr, nil
+}
+
+// solveCheckboxPoW подбирает nonce для checkbox-капчи.
+// Отличается от showcaptchafast порядком хеша: SHA256(prefix || nonce),
+// nonce = 8 байт big-endian миллисекунд + 8 случайных байт.
+func solveCheckboxPoW(prefixHex string, complexity int) (string, int64) {
+	prefix, err := hexDecode(prefixHex)
+	if err != nil || len(prefix) == 0 {
+		prefix = []byte(prefixHex)
+	}
+
+	t0 := time.Now()
+	var nonce [16]byte
+	for attempts := 1; attempts < 100_000_000; attempts++ {
+		putU64BE(nonce[0:8], uint64(time.Now().UnixMilli()))
+		for i := 8; i < 16; i++ {
+			nonce[i] = byte(rand.Intn(256))
+		}
+
+		h := sha256.New()
+		h.Write(prefix)
+		h.Write(nonce[:])
+		if captchaCheckComplexity(h.Sum(nil), complexity) {
+			return hexEncode(nonce[:]), time.Since(t0).Milliseconds()
+		}
+	}
+	return "", 0
+}
+
+// encodeCheckboxTrackData синтезирует tdata — поведенческую телеметрию
+// checkbox-капчи: траекторию мыши к чекбоксу и клик по нему.
+// Возвращает base64 и суммарную длительность таймлайна в мс.
+func encodeCheckboxTrackData() (string, int64) {
+	const (
+		targetX = 640
+		targetY = 400
+		points  = 24
+	)
+	startX := 200 + rand.Intn(400)
+	startY := 150 + rand.Intn(200)
+	ts := int64(400 + rand.Intn(600))
+
+	track := struct {
+		PointerPositions [][]int64 `json:"pointerPositions"`
+		ClickPositions   [][]int64 `json:"clickPositions"`
+		Keyboard         struct {
+			Total int `json:"total"`
+			Copy  int `json:"copy"`
+			Paste int `json:"paste"`
+		} `json:"keyboard"`
+	}{}
+	for i := 0; i < points; i++ {
+		// ease-out: быстрый разгон, плавное замедление у чекбокса
+		p := float64(i) / (points - 1)
+		e := 1 - (1-p)*(1-p)
+		jx := 0
+		jy := 0
+		if i > 0 && i < points-1 {
+			jx = rand.Intn(9) - 4
+			jy = rand.Intn(9) - 4
+		}
+		x := startX + int(e*float64(targetX-startX)) + jx
+		y := startY + int(e*float64(targetY-startY)) + jy
+		ts += int64(40 + rand.Intn(70))
+		track.PointerPositions = append(track.PointerPositions,
+			[]int64{ts, int64(x), int64(y)})
+	}
+	ts += int64(60 + rand.Intn(90))
+	track.ClickPositions = append(track.ClickPositions,
+		[]int64{ts, targetX, targetY})
+
+	raw, _ := json.Marshal(track)
+	return base64.StdEncoding.EncodeToString(raw), ts
 }
 
 // ---- парсинг showcaptchafast ----
@@ -349,6 +640,17 @@ func putU64LE(b []byte, v uint64) {
 	b[5] = byte(v >> 40)
 	b[6] = byte(v >> 48)
 	b[7] = byte(v >> 56)
+}
+
+func putU64BE(b []byte, v uint64) {
+	b[0] = byte(v >> 56)
+	b[1] = byte(v >> 48)
+	b[2] = byte(v >> 40)
+	b[3] = byte(v >> 32)
+	b[4] = byte(v >> 24)
+	b[5] = byte(v >> 16)
+	b[6] = byte(v >> 8)
+	b[7] = byte(v)
 }
 
 func mustMarshal(v interface{}) []byte {
