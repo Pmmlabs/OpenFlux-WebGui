@@ -12,6 +12,11 @@ type TransportConfig struct {
 	ReconnectMultiplier  float64
 	MaxQueueSize         int
 	KeepAliveInterval    time.Duration
+	// CookieFile persists the HTTP cookie session (captcha-passed state)
+	// across restarts. Empty = in-memory reuse only. Used by the Yandex
+	// Docs transport; each captcha solve burns IP reputation (~40 solves
+	// from one IP triggers the unsolvable silhouette escalation).
+	CookieFile string
 }
 
 type Transport interface {
@@ -137,7 +142,6 @@ func (b *BaseTransport) RecordReceive(bytes int) {
 func (b *BaseTransport) RecordReconnect() {
 	b.reconnectAttempts.Add(1)
 }
-
 
 func (b *BaseTransport) GetConfig() TransportConfig {
 	return b.config
