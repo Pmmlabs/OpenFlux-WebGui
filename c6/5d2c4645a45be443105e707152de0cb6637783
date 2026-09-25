@@ -1,0 +1,20 @@
+transport/yandex/yandex.go
+  s_09220afa455a45::t_2a2aecdf630a30 457-458,461-465
+  s_09220afa455a45::t_51dd061193f008 466
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c65d2c4645a45be443105e707152de0cb6637783",
+  "prompts": {},
+  "sessions": {
+    "s_09220afa455a45": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f2cb9c9beffeeEyLvxeqcinAwc",
+        "model": "glm-5.3"
+      },
+      "human_author": "Pmmlabs <microreticulum@pmmlabs.ru>"
+    }
+  }
+}
