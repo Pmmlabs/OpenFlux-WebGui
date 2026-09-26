@@ -1,0 +1,52 @@
+internal/transport/yandex/captcha_debug_test.go
+  s_09220afa455a45::t_aac156ff62297b 1-3,5-7,10,17,23-24,29,31
+  s_fdc14419c4124e::t_ef6cc9536e29e3 4
+  s_fdc14419c4124e::t_e5402c5a35a255 8
+  s_09220afa455a45::t_899a429864000c 9,11-16,18-22,25-28,30
+cmd/openflux/main.go
+  s_fdc14419c4124e::t_09b15cd40e22c0 424
+  s_fdc14419c4124e::t_b23899faa9c948 10
+  s_fdc14419c4124e::t_71bd1fdc692665 115,117-119
+  s_fdc14419c4124e::t_068e87d2d72411 737-758
+  s_fdc14419c4124e::t_fc240c6cddf9b8 759
+internal/transportstack/transportstack.go
+  s_fdc14419c4124e::t_754a858d771ff7 124-128
+  s_fdc14419c4124e::t_5a652fa6a996b6 15
+  s_fdc14419c4124e::t_9d1b46d365e098 156-172,179-180
+.gitignore
+  s_fdc14419c4124e::t_eabc5f5690f449 58-60
+go.mod
+  s_fdc14419c4124e::t_da24e7b1a63a45 5-6,8,14-15,24,26-27,29,50
+go.sum
+  s_fdc14419c4124e::t_8cc2cfc77db8f6 1-4,9-10,13-16,19-20,81-82,154-155
+internal/transport/yandex/greedvm.go
+  s_fdc14419c4124e::t_366b51a458bbdd 1-413
+internal/transport/yandex/metrika.go
+  s_fdc14419c4124e::t_322d988401974e 1-197
+internal/transport/yandex/yandex.go
+  s_fdc14419c4124e::t_7afff9c07b1e89 71-75,100,247-255,661-665,667-669,671,673,678-684,723-751,835-838
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c151095500efc101a6e5398a601173cc7db58ac6",
+  "prompts": {},
+  "sessions": {
+    "s_09220afa455a45": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f2cb9c9beffeeEyLvxeqcinAwc",
+        "model": "glm-5.3"
+      },
+      "human_author": "Pmmlabs <microreticulum@pmmlabs.ru>"
+    },
+    "s_fdc14419c4124e": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f4a608ec2ffeoj39NPq2OHBxK1",
+        "model": "glm-5.3"
+      },
+      "human_author": "Pmmlabs <microreticulum@pmmlabs.ru>"
+    }
+  }
+}
