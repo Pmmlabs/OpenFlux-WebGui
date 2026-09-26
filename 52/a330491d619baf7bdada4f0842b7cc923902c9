@@ -1,0 +1,23 @@
+transport/yandex/cookies_test.go
+  s_09220afa455a45::t_6318a9da663402 1-83
+transport/yandex/cookies.go
+  s_09220afa455a45::t_f52855b048e2e2 168-170
+  s_09220afa455a45::t_bacf7820549135 1-150,156-167,171-188
+  s_09220afa455a45::t_8889204e6d96e5 151-155
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "52a330491d619baf7bdada4f0842b7cc923902c9",
+  "prompts": {},
+  "sessions": {
+    "s_09220afa455a45": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f2cb9c9beffeeEyLvxeqcinAwc",
+        "model": "glm-5.3"
+      },
+      "human_author": "Pmmlabs <microreticulum@pmmlabs.ru>"
+    }
+  }
+}
