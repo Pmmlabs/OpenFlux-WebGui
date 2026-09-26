@@ -1,0 +1,35 @@
+transport/yandex/yandex.go
+  s_09220afa455a45::t_f123dad41ce406 416-418
+  s_09220afa455a45::t_3d8e975bbf4734 487-489,492-498
+  s_09220afa455a45::t_d0ea03a4b5a8ac 433-437
+  s_09220afa455a45::t_42c1acd75a59c3 486,491,500
+  s_09220afa455a45::t_a0324571fead14 419-420
+  s_09220afa455a45::t_3e78b93ab8852e 590-592
+  s_09220afa455a45::t_0df9fab28bfc97 63-67,77
+  s_09220afa455a45::t_d0f459173f05b2 145-153
+  s_09220afa455a45::t_799d20284eb50d 415
+  s_09220afa455a45::t_9706e756f966e3 432
+  s_09220afa455a45::t_b4ba19e5343fea 589
+transport/transport.go
+  s_09220afa455a45::t_6580d1f68179dd 15-19
+main.go
+  s_09220afa455a45::t_2c3170aafad8ce 286
+  s_09220afa455a45::t_8d29bc46e89bdb 8
+  s_09220afa455a45::t_7fcaf47ccd6867 98-100
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ac487fdeb67e0ba27869da62e989485fdb6fb743",
+  "prompts": {},
+  "sessions": {
+    "s_09220afa455a45": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f2cb9c9beffeeEyLvxeqcinAwc",
+        "model": "glm-5.3"
+      },
+      "human_author": "Pmmlabs <microreticulum@pmmlabs.ru>"
+    }
+  }
+}
