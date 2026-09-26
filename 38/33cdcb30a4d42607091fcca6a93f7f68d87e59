@@ -1,0 +1,61 @@
+internal/transportstack/transportstack.go
+  s_fdc14419c4124e::t_5a652fa6a996b6 14
+  s_fdc14419c4124e::t_754a858d771ff7 124-128
+  s_fdc14419c4124e::t_9d1b46d365e098 156-172,179-180
+internal/transport/yandex/yandex.go
+  s_09220afa455a45::t_dacc9af5178c20 723-727,730-731,747-751
+  s_09220afa455a45::t_340e2a73acf749 667-669,671
+  s_09220afa455a45::t_f123dad41ce406 662-664
+  s_09220afa455a45::t_d7a70804239019 673,684
+  s_09220afa455a45::t_42c1acd75a59c3 732,737,746
+  s_09220afa455a45::t_0df9fab28bfc97 71-75,100
+  s_09220afa455a45::t_a0324571fead14 665
+  s_09220afa455a45::t_2a2aecdf630a30 728-729,736
+  s_fdc14419c4124e::t_ce7cbde65ef70b 6
+  s_09220afa455a45::t_3e78b93ab8852e 836-838
+  s_09220afa455a45::t_d0f459173f05b2 247-255
+  s_09220afa455a45::t_b4ba19e5343fea 835
+  s_09220afa455a45::t_799d20284eb50d 661
+  s_09220afa455a45::t_51dd061193f008 745
+  s_09220afa455a45::t_d0ea03a4b5a8ac 679-683
+  s_09220afa455a45::t_3d8e975bbf4734 733-735,738-744
+  s_09220afa455a45::t_9706e756f966e3 678
+.gitignore
+  s_fdc14419c4124e::t_f24c3c9c40d7c5 58-60
+go.mod
+  s_fdc14419c4124e::t_d2306f11292c1d 5-6,8,14-15,24,26-27,29,50
+go.sum
+  s_fdc14419c4124e::t_ca3034c8cc24b1 1-4,9-10,13-16,19-20,81-82,154-155
+internal/transport/yandex/captcha_debug_test.go
+  s_fdc14419c4124e::t_52257a7cd5456a 1-31
+internal/transport/yandex/greedvm.go
+  s_fdc14419c4124e::t_6db4000c37b79a 1-413
+internal/transport/yandex/metrika.go
+  s_fdc14419c4124e::t_fe2155fd50c5f3 1-197
+cmd/openflux/main.go
+  s_fdc14419c4124e::t_0d213f2d1d76d6 10,115,117-119,424,737-759
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3833cdcb30a4d42607091fcca6a93f7f68d87e59",
+  "prompts": {},
+  "sessions": {
+    "s_09220afa455a45": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f2cb9c9beffeeEyLvxeqcinAwc",
+        "model": "glm-5.3"
+      },
+      "human_author": "Pmmlabs <microreticulum@pmmlabs.ru>"
+    },
+    "s_fdc14419c4124e": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f4a608ec2ffeoj39NPq2OHBxK1",
+        "model": "glm-5.3"
+      },
+      "human_author": null
+    }
+  }
+}
