@@ -8,6 +8,7 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -295,8 +296,14 @@ func runGreedJS(greedSrc, pageURL string, timeout time.Duration) (string, error)
 
 	stub := greedStubJS
 	if pageURL != "" {
+		// href = реальный URL страницы капчи...
 		stub = strings.Replace(stub,
 			"https://docs.yandex.ru/showcaptcha?cc=1", pageURL, 1)
+		// ...а host/hostname/origin в стабе должны совпадать с доменом
+		// страницы (вне РФ — docs.yandex.com, не .ru).
+		if u, perr := url.Parse(pageURL); perr == nil && u.Host != "" && u.Host != "docs.yandex.ru" {
+			stub = strings.ReplaceAll(stub, "docs.yandex.ru", u.Host)
+		}
 	}
 	if _, err := vm.RunString(stub); err != nil {
 		return "", fmt.Errorf("greed stub: %w", err)
@@ -343,7 +350,13 @@ func runGreedJS(greedSrc, pageURL string, timeout time.Duration) (string, error)
 // buildGreedRdata — загружает greed.js с cookies текущей сессии,
 // выполняет в JS-ранчере и возвращает rdata = base64(JSON(safeGet())).
 func buildGreedRdata(client *http.Client, jar http.CookieJar, pageURL, userAgent string) (string, error) {
-	req, err := http.NewRequest("GET", "https://docs.yandex.ru/captchapgrd", nil)
+	// greed.js грузится с того же домена, что и страница капчи
+	// (вне РФ — docs.yandex.com).
+	origin := "https://docs.yandex.ru"
+	if u, perr := url.Parse(pageURL); perr == nil && u.Scheme != "" && u.Host != "" {
+		origin = u.Scheme + "://" + u.Host
+	}
+	req, err := http.NewRequest("GET", origin+"/captchapgrd", nil)
 	if err != nil {
 		return "", err
 	}

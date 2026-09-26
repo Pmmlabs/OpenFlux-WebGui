@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -326,7 +327,11 @@ DEPRECATED (removed in v2)
 		}
 		context := *transportType
 		if globalDocUrl != "" {
-			context = globalDocUrl
+			// Домен-независимый контекст: один и тот же документ доступен
+			// как disk.yandex.ru, так и disk.yandex.com (регион решает).
+			// Соль KDF из полной строки URL давала разные ключи у клиента
+			// (.com) и exit-ноды (.ru) — пакеты не расшифровывались.
+			context = encryptionContext(globalDocUrl)
 		}
 		encrypted, err := transport.NewEncryptedTransport(inner, strings.TrimSpace(string(secretBytes)), context, *role == roleExit)
 		if err != nil {
@@ -472,4 +477,21 @@ func resolveCookieFile(explicit string) string {
 	}
 	log.Printf("Cookie session file: none (no writable directory found)")
 	return ""
+}
+
+// encryptionContext derives the KDF salt input from a document URL in a
+// domain-independent way: same document, same keys, whether the peer reached
+// it via disk.yandex.ru or disk.yandex.com (Yandex serves the doc under the
+// region-dependent domain). Falls back to the raw string when the URL has no
+// usable path.
+func encryptionContext(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Path == "" || u.Path == "/" {
+		return rawURL
+	}
+	ctx := u.Path
+	if u.RawQuery != "" {
+		ctx += "?" + u.RawQuery
+	}
+	return ctx
 }

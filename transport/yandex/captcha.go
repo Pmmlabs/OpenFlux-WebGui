@@ -90,7 +90,7 @@ func solveCaptcha(docURL string, jar http.CookieJar, userAgent string) (string, 
 	}
 	utils.Debugf("[CAPTCHA] showcaptcha: %d bytes", len(body))
 
-	ssr, formAction, err := parseCaptchaHTML(string(body))
+	ssr, formAction, err := parseCaptchaHTML(string(body), captchaURL)
 	if err != nil {
 		return "", err
 	}
@@ -121,7 +121,14 @@ func solveCaptcha(docURL string, jar http.CookieJar, userAgent string) (string, 
 	req2, _ := http.NewRequest("POST", formAction, strings.NewReader(form.Encode()))
 	setBrowserHeaders(req2, userAgent)
 	req2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req2.Header.Set("Origin", "https://docs.yandex.ru")
+	// Origin обязан совпадать с доменом капчи: токен выдан бэкендом этого
+	// домена (вне РФ Яндекс редиректит на docs.yandex.com — сабмит на .ru
+	// давал 400).
+	if u2, perr := url.Parse(formAction); perr == nil && u2.Scheme != "" && u2.Host != "" {
+		req2.Header.Set("Origin", u2.Scheme+"://"+u2.Host)
+	} else {
+		req2.Header.Set("Origin", "https://docs.yandex.ru")
+	}
 	req2.Header.Set("Referer", captchaURL)
 
 	resp2, err := client.Do(req2)
@@ -457,7 +464,7 @@ var (
 	reFormAction = regexp.MustCompile(`<form[^>]*id="tmgrdfrend-form"[^>]*action="([^"]+)"`)
 )
 
-func parseCaptchaHTML(html string) (*captchaSSRData, string, error) {
+func parseCaptchaHTML(html, pageURL string) (*captchaSSRData, string, error) {
 	m := reSSRData.FindStringSubmatch(html)
 	if len(m) < 2 {
 		return nil, "", fmt.Errorf("captcha: __SSR_DATA__ not found")
@@ -477,7 +484,14 @@ func parseCaptchaHTML(html string) (*captchaSSRData, string, error) {
 	}
 	formAction := strings.ReplaceAll(m2[1], "&amp;", "&")
 	if strings.HasPrefix(formAction, "/") {
-		formAction = "https://docs.yandex.ru" + formAction
+		// Форма капчи живёт на домене, выдавшем токен: вне РФ это
+		// docs.yandex.com, и сабмит на захардкоженный .ru отвергается
+		// с 400. Домен берём из URL самой страницы капчи.
+		origin := "https://docs.yandex.ru"
+		if u, perr := url.Parse(pageURL); perr == nil && u.Scheme != "" && u.Host != "" {
+			origin = u.Scheme + "://" + u.Host
+		}
+		formAction = origin + formAction
 	}
 
 	return &ssr, formAction, nil
