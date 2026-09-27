@@ -136,6 +136,8 @@ func sendMetrikaBeacons(jar http.CookieJar, pageURL, uniqueKey, pageTitle, userA
 		},
 	}
 
+	defer t2.CloseIdleConnections()
+
 	vf, hid, ls := metrikaBrowserState()
 	now := time.Now()
 	uts := now.UnixMicro()
