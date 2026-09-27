@@ -1,0 +1,14 @@
+transport/yandex/metrika.go
+  h_4bfcd31e5ba605 139-140
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c7a0ff5d073dc5f678cd853a75ab021ce830d469",
+  "prompts": {},
+  "humans": {
+    "h_4bfcd31e5ba605": {
+      "author": "Pmmlabs <microreticulum@pmmlabs.ru>"
+    }
+  }
+}
