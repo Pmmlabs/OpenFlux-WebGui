@@ -543,11 +543,14 @@ func captchaCheckComplexity(h []byte, complexity int) bool {
 // ---- fingerprint ----
 
 func buildCaptchaFingerprint(nonceHex, userAgent string) map[string]interface{} {
+	// Экран — из текущего профиля устройства, того же, что видит GREED
+	p := getDeviceProfile()
+	screenH, screenW := p.ScreenH, p.ScreenW
 	return map[string]interface{}{
 		"b6": 8, "b7": 8, "b9": []string{"en-US", "en"},
 		"c2": "", "c4": "MacIntel", "c5": []interface{}{}, "c9": userAgent,
-		"f4": 1080, "f5": 1920, "f6": 24, "f7": 1080, "f8": true,
-		"f9": []int{1920, 1080}, "g1": 1920,
+		"f4": screenH, "f5": screenW, "f6": 24, "f7": screenH, "f8": true,
+		"f9": []int{screenW, screenH}, "g1": screenW,
 		"g2": "Europe/Moscow", "g3": -180,
 		"j5": true,
 		"m2": map[string]interface{}{"mTP": 0, "tE": false, "tS": false},

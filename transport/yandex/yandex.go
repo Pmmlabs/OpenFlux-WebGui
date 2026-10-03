@@ -44,6 +44,13 @@ var (
 // re-lock) - и цикл waitAuth становится вечным.
 const authWatchdogInterval = 45 * time.Second
 
+// Прогрессивная пауза при силуэтной эскалации капчи (бот-флаг IP):
+// 30м -> 1ч -> 2ч -> 4ч (потолок). См. YandexDocsTransport.botFlagCooldownN.
+const (
+	botFlagCooldownBase = 30 * time.Minute
+	botFlagCooldownMax  = 4 * time.Hour
+)
+
 type YandexDocsInfo struct {
 	CookieStr   string
 	Token       string
@@ -119,6 +126,13 @@ type YandexDocsTransport struct {
 
 	userCounter atomic.Int32
 	baseUserID  string
+	// botFlagCooldownN - сколько раз подряд fetchDocInfo упирался в
+	// силуэтную эскалацию. Прогрессивная пауза между попытками
+	// (30м -> 1ч -> 2ч -> 4ч, потолок 4ч): флаг бота распадается медленно,
+	// а каждая попытка - это капча + GREED VM (на слабом ARM роутера -
+	// десятки секунд 100% CPU) и минус репутация. Плоские 30 минут дают
+	// вечный CPU-цикл каждые полчаса. Сбрасывается при успешном fetchDocInfo.
+	botFlagCooldownN atomic.Int32
 }
 
 func NewYandexDocsTransport(url string, config transport.TransportConfig) *YandexDocsTransport {
@@ -190,10 +204,17 @@ func (t *YandexDocsTransport) connectToDoc(attempt int) {
 		if err != nil {
 			utils.Debugf("[YDOCS] fetchDocInfo failed: %v", err)
 			// Серьёзная эскалация капчи: IP помечен ботным, флаг распадается
-			// медленно. Для предотвращения жжения репутации - пауза 30 минут.
+			// медленно. Прогрессивная пауза (30м -> 1ч -> 2ч -> 4ч): каждая
+			// попытка жжёт репутацию и греет CPU (капча + GREED VM), поэтому
+			// чем дольше флаг держится, тем реже пробуем.
 			if strings.Contains(err.Error(), "escalated to silhouette") {
-				utils.Debugf("[YDOCS] bot-flagged: cooling down 30m before next attempt")
-				time.Sleep(30 * time.Minute)
+				n := t.botFlagCooldownN.Add(1)
+				d := botFlagCooldownBase << (n - 1)
+				if d > botFlagCooldownMax || d <= 0 { // guard от переполнения сдвига
+					d = botFlagCooldownMax
+				}
+				utils.Debugf("[YDOCS] bot-flagged: cooling down %v before next attempt (streak %d)", d, n)
+				time.Sleep(d)
 				if !t.IsRunning() {
 					return
 				}
@@ -201,6 +222,9 @@ func (t *YandexDocsTransport) connectToDoc(attempt int) {
 			t.scheduleReconnect(attempt)
 			return
 		}
+		// Капча пройдена (или не требовалась) - бот-флаг спал, сбрасываем
+		// прогрессию cooldown'а.
+		t.botFlagCooldownN.Store(0)
 
 		// Hard TCP dial timeout so a stuck connect/DNS to the balancer host
 		// can't hang the whole transport (HandshakeTimeout alone proved
@@ -324,6 +348,12 @@ func (t *YandexDocsTransport) writerLoop() {
 	}
 
 	var pending []byte
+	// Сессия, запись в которую уже падала: после close-хендшейка (gorilla
+	// отвечает close-кадром на close сервера) любые записи в неё навсегда
+	// дают "websocket: close sent". Ретраи против мёртвой сессии каждые
+	// 15мс только заливают лог (~150 строк "Write error" за реконнект) -
+	// ждём подмены сессии реконнектом, ошибку логируем один раз.
+	var failedSession *DocSession
 	for t.IsRunning() {
 		if pending == nil {
 			packet, ok := <-queue
@@ -345,10 +375,14 @@ func (t *YandexDocsTransport) writerLoop() {
 		payload := base64.StdEncoding.EncodeToString(pending)
 		msg := fmt.Sprintf(`42["message",{"type":"cursor","cursor":"18;%s"}]`, payload)
 		if err := session.safeWrite(websocket.TextMessage, []byte(msg)); err != nil {
-			utils.Debugf("[YDOCS] Write error: %v", err)
-			time.Sleep(15 * time.Millisecond)
+			if session != failedSession {
+				utils.Debugf("[YDOCS] Write error: %v (holding packet until reconnect)", err)
+				failedSession = session
+			}
+			time.Sleep(100 * time.Millisecond)
 			continue // keep pending; the reconnect will bring up a new conn
 		}
+		failedSession = nil
 		pending = nil
 	}
 }
@@ -401,6 +435,21 @@ func (t *YandexDocsTransport) handleMessage(session *DocSession, data []byte) {
 	}
 
 	if strings.Contains(text, "---KA---") {
+		return
+	}
+
+	// Idle-предупреждение сессии (code 4002, у Яндекса interval=20 мин):
+	// сервер засчитывает активность ТОЛЬКО сообщением extendSession -
+	// курсор-KA не считается (DocsCoServer.js обновляет
+	// sessionTimeLastAction лишь в case 'extendSession'). Браузерный
+	// редактор отвечает на предупреждение extendSession; без ответа
+	// сервер рвёт сессию disconnectReason 4002 каждые ~20 мин, а каждый
+	// такой разрыв - обрыв туннеля, реконнект-шторм клиентов и (на
+	// слабом CPU) всплеск нагрузки при решении капчи.
+	if strings.Contains(text, `"type":"session"`) && strings.Contains(text, `"code":4002`) {
+		session.safeWrite(websocket.TextMessage,
+			[]byte(`42["message",{"type":"extendSession","idletime":0}]`))
+		utils.Debugf("[YDOCS] idle warning -> sent extendSession")
 		return
 	}
 
@@ -603,6 +652,10 @@ func (t *YandexDocsTransport) fetchDocInfo(url, userID string) (YandexDocsInfo, 
 					escalations++
 					if escalations >= 3 {
 						jar.Clear()
+						// Новая cookie-идентичность = новое "устройство":
+						// перевыгенерим профиль отпечатка, чтобы не приносить
+						// прожжённый fingerprint на свежие cookies.
+						refreshDeviceProfile()
 						return YandexDocsInfo{}, fmt.Errorf("captcha escalated to silhouette %d times (bot-flagged session/IP)", escalations)
 					}
 					utils.Debugf("[YDOCS] silhouette escalation #%d, retrying original url", escalations)

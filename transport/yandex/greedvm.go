@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/dop251/goja"
@@ -27,6 +28,53 @@ import (
 // капчу до силуэтной. Единственный надёжный способ получить валидный
 // rdata — выполнить настоящий greed.js, чтобы он сам собрал отпечаток
 // и зашифровал его правильным ключом.
+
+// ---- device profile ----
+//
+// Оба отпечатка (smartcaptcha fingerprint и GREED) должны описывать ОДНО
+// устройство. Профиль случаен и живёт столько же, сколько
+// cookie-идентичность: генерится лениво при первом использовании и
+// перегенеривается при jar.Clear() (силуэтная эскалация = новая
+// идентичность = новое "устройство").
+
+type deviceProfile struct {
+	ScreenW, ScreenH    int
+	AvailW, AvailH      int
+	HardwareConcurrency int
+}
+
+// Правдоподобные экраны macOS (согласовано с UA MacIntel / Chrome):
+// avail* меньше на высоту строки меню (~25px).
+var macScreens = [][4]int{
+	{1440, 900, 1440, 875},   // MacBook Air 13"
+	{1512, 982, 1512, 957},   // MacBook Pro 14"
+	{1728, 1117, 1728, 1092}, // MacBook Pro 16"
+	{1920, 1080, 1920, 1055}, // внешний FHD
+	{2560, 1440, 2560, 1415}, // внешний 2K
+	{1680, 1050, 1680, 1025}, // внешний 1680×1050
+}
+
+func newDeviceProfile() *deviceProfile {
+	s := macScreens[rand.Intn(len(macScreens))]
+	return &deviceProfile{
+		ScreenW: s[0], ScreenH: s[1], AvailW: s[2], AvailH: s[3],
+		// Реальные значения navigator.hardwareConcurrency у Chrome на Mac.
+		HardwareConcurrency: []int{8, 10, 12, 16}[rand.Intn(4)],
+	}
+}
+
+var currentDeviceProfile atomic.Pointer[deviceProfile]
+
+// refreshDeviceProfile перевыгенеривает профиль (новая идентичность).
+func refreshDeviceProfile() { currentDeviceProfile.Store(newDeviceProfile()) }
+
+func getDeviceProfile() *deviceProfile {
+	if p := currentDeviceProfile.Load(); p != nil {
+		return p
+	}
+	refreshDeviceProfile()
+	return currentDeviceProfile.Load()
+}
 
 // greedStubJS — окружение браузера для greed.js. Значения сняты с
 // headless Chrome 141 (macOS), того же профиля, что и весь остальной
@@ -295,6 +343,16 @@ func runGreedJS(greedSrc, pageURL string, timeout time.Duration) (string, error)
 	setGreedVMHelpers(vm, &timers)
 
 	stub := greedStubJS
+	// Экран и число ядер — из текущего профиля устройства (см.
+	// deviceProfile): стаб содержит плейсхолдеры 800×600 / 12 ядер.
+	if p := getDeviceProfile(); p != nil {
+		stub = strings.Replace(stub,
+			"width: 800, height: 600, availWidth: 800, availHeight: 600",
+			fmt.Sprintf("width: %d, height: %d, availWidth: %d, availHeight: %d",
+				p.ScreenW, p.ScreenH, p.AvailW, p.AvailH), 1)
+		stub = strings.Replace(stub, "hardwareConcurrency: 12",
+			fmt.Sprintf("hardwareConcurrency: %d", p.HardwareConcurrency), 1)
+	}
 	if pageURL != "" {
 		// href = реальный URL страницы капчи...
 		stub = strings.Replace(stub,
