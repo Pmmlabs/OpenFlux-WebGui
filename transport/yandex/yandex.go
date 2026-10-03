@@ -25,8 +25,24 @@ import (
 // receive path.
 var (
 	cursorPayloadRe = regexp.MustCompile(`"cursor":"[^;]+;([^"]+)"`)
+	messageTypeRe   = regexp.MustCompile(`"type":"([^"]+)"`)
+	sidRe           = regexp.MustCompile(`"sid":"([^"]+)"`)
+	authResultRe    = regexp.MustCompile(`"type":"auth","result":(\d+),"sessionId":"([^"]+)"`)
 	clientConfigRe  = regexp.MustCompile(`<script[^>]*id="client-config"[^>]*>(.*?)</script>`)
 )
+
+// Сколько ждать подтверждения нашей editor-сессии (auth result:1 с нашим
+// sessionId) до принудительного реконнекта. Здоровое подтверждение
+// приходит за ~5с; 60с (серверный drop ждущего) - слишком долго для
+// молча мёртвого туннеля.
+// authWatchdogInterval должен быть БОЛЬШЕ серверного таймера лока
+// (services.CoAuthoring.expire.lockDoc = 30с, см. DocsCoServer.js
+// setLockDocumentTimer): при молчащем/мёртвом держателе сервер сам
+// форс-анлокает лок и authed ждущего по таймеру. Если наш watchdog
+// сработает раньше и переподключится, каждый новый джойн сбрасывает
+// серверный таймер (cleanLockDocumentTimer+setLockDocumentTimer при
+// re-lock) - и цикл waitAuth становится вечным.
+const authWatchdogInterval = 45 * time.Second
 
 type YandexDocsInfo struct {
 	CookieStr   string
@@ -47,6 +63,41 @@ type DocSession struct {
 	WriteQueue chan []byte
 	UserID     string
 	writeMu    sync.Mutex
+
+	// Наш socket.io sid (из handshake-кадра "0{\"sid\":...}") и признак
+	// подтверждения нашей editor-сессии сервером (auth result:1 с нашим
+	// sessionId). До подтверждения сервер не релеит наши сообщения
+	// участникам - туннель молча мёртв, поэтому connectToDoc держит
+	// auth-watchdog.
+	sid        string
+	authMu     sync.Mutex
+	authed     bool
+	authFailed bool
+}
+
+// AuthConfirmed reports whether the server accepted our editor session.
+func (s *DocSession) AuthConfirmed() bool {
+	s.authMu.Lock()
+	defer s.authMu.Unlock()
+	return s.authed
+}
+
+// markAuth records the server's verdict for our own sessionId.
+func (s *DocSession) markAuth(ok bool) {
+	s.authMu.Lock()
+	defer s.authMu.Unlock()
+	if ok {
+		s.authed = true
+	} else {
+		s.authFailed = true
+	}
+}
+
+// AuthRejected reports whether the server explicitly rejected our session.
+func (s *DocSession) AuthRejected() bool {
+	s.authMu.Lock()
+	defer s.authMu.Unlock()
+	return s.authFailed
 }
 
 func (s *DocSession) safeWrite(messageType int, data []byte) error {
@@ -127,17 +178,13 @@ func (t *YandexDocsTransport) connectToDoc(attempt int) {
 				utils.Debugf("[PANIC] recovered in yandex.connect: %v", r)
 			}
 		}()
-		t.Mu.Lock()
-		existingSession := t.session
-		t.Mu.Unlock()
-
-		var userID string
-		if existingSession != nil {
-			userID = existingSession.UserID
-		} else {
-			suffix := fmt.Sprintf("%03d", t.userCounter.Add(1)%1000)
-			userID = t.baseUserID + suffix
-		}
+		// Свежий userID на каждую попытку. Переиспользование ID только
+		// что убитого участника сервер отвергает мгновенным close 1005
+		// (duplicate participant), превращая реконнект в цикл
+		// connect->kick->connect: пока призрак прошлого подключения не
+		// истечёт по TTL, зайти под тем же ID невозможно.
+		suffix := fmt.Sprintf("%03d", t.userCounter.Add(1)%1000)
+		userID := t.baseUserID + suffix
 
 		info, err := t.fetchDocInfo(t.url, userID)
 		if err != nil {
@@ -185,9 +232,11 @@ func (t *YandexDocsTransport) connectToDoc(attempt int) {
 		utils.Debugf("[YDOCS] WebSocket connected to %s", info.Host)
 
 		writeQueue := make(chan []byte, t.GetConfig().MaxQueueSize)
-		if existingSession != nil {
-			writeQueue = existingSession.WriteQueue
+		t.Mu.Lock()
+		if t.session != nil {
+			writeQueue = t.session.WriteQueue
 		}
+		t.Mu.Unlock()
 
 		session := &DocSession{
 			Info:       info,
@@ -197,11 +246,12 @@ func (t *YandexDocsTransport) connectToDoc(attempt int) {
 		}
 
 		t.Mu.Lock()
+		hadSession := t.session != nil
 		t.session = session
 		t.SetConnected(true)
 		t.Mu.Unlock()
 
-		if existingSession == nil {
+		if !hadSession {
 			utils.SafeGo("yandex.writer", t.writerLoop)
 		}
 
@@ -217,6 +267,19 @@ func (t *YandexDocsTransport) connectToDoc(attempt int) {
 		}
 		messagePart, _ := json.Marshal([]interface{}{"message", authData})
 		session.safeWrite(websocket.TextMessage, []byte(fmt.Sprintf("42%s", string(messagePart))))
+
+		// Auth-watchdog: если сервер не подтверждает нашу сессию дольше
+		// authWatchdogInterval - рвём соединение сами и переподключаемся
+		// со свежим userID. Интервал заведомо больше серверного таймера
+		// лока (30с): при молчащем держателе сервер сам форс-анлокает лок
+		// и authed ждущего раньше, чем сработает watchdog.
+		watchdog := time.AfterFunc(authWatchdogInterval, func() {
+			if !session.AuthConfirmed() && session.sid != "" {
+				utils.Debugf("[YDOCS] auth not confirmed in %v, reconnecting", authWatchdogInterval)
+				conn.Close()
+			}
+		})
+		defer watchdog.Stop()
 
 		connectedAt := time.Now()
 		for t.IsRunning() {
@@ -313,8 +376,57 @@ func (t *YandexDocsTransport) keepAliveLoop() {
 func (t *YandexDocsTransport) handleMessage(session *DocSession, data []byte) {
 	text := string(data)
 
+	// Socket.IO handshake: запоминаем свой sid - по нему опознаём свой
+	// auth result среди broadcast-сообщений чужих подключений.
+	if strings.HasPrefix(text, "0{") || strings.HasPrefix(text, "40{") {
+		if m := sidRe.FindStringSubmatch(text); m != nil {
+			session.sid = m[1]
+			utils.Debugf("[YDOCS] socket.io sid=%s", session.sid)
+		}
+		return
+	}
+
+	// Подтверждение/отвержение нашей editor-сессии. auth-кадры
+	// рассылаются всем участникам, поэтому сверяем sessionId со своим.
+	if m := authResultRe.FindStringSubmatch(text); m != nil && m[2] == session.sid {
+		if m[1] == "1" {
+			session.markAuth(true)
+			utils.Debugf("[YDOCS] auth confirmed (sid=%s)", session.sid)
+		} else {
+			session.markAuth(false)
+			utils.Debugf("[YDOCS] auth rejected (result=%s), reconnecting", m[1])
+			session.Conn.Close()
+		}
+		return
+	}
+
 	if strings.Contains(text, "---KA---") {
 		return
+	}
+
+	// Держатель лока узнаёт о ждущем редакторе через broadcast connectState
+	// с waitAuth:true (DocsCoServer.js sendParticipantsState). Пока держатель
+	// не ответит {"type":"unLockDocument","unlock":true}, сервер держит
+	// джойнера в waitAuth, а таймер принудительного анлока
+	// (setLockDocumentTimer, ~60с) сбрасывается каждым новым джойном ждущего
+	// (cleanLockDocumentTimer+setLockDocumentTimer) - без ответа цикл
+	// вечный. Отвечаем немедленно; ответ от не-держателя безвреден:
+	// unlockAuth сверяет userId и молча проваливается.
+	if session.AuthConfirmed() &&
+		strings.Contains(text, `"type":"connectState"`) &&
+		strings.Contains(text, `"waitAuth":true`) {
+		session.safeWrite(websocket.TextMessage,
+			[]byte(`42["message",{"type":"unLockDocument","unlock":true}]`))
+		utils.Debugf("[YDOCS] waitAuth broadcast -> sent unLockDocument")
+		return
+	}
+
+	// Контрольные сообщения коллаборации (lockDocument и пр.) раньше
+	// молча игнорировались - а именно на них надо отвечать unLockDocument,
+	// иначе сервер выкидывает держателя лока через 60с (disconnectReason
+	// 4007, см. DocsCoServer.js setLockDocumentTimer/checkEndAuthLock).
+	if m := messageTypeRe.FindStringSubmatch(text); m != nil && m[1] != "cursor" {
+		utils.Debugf("[YDOCS] control message: %s", shortStr(text, 400))
 	}
 
 	// Socket.IO ping - respond with pong (use safeWrite)
