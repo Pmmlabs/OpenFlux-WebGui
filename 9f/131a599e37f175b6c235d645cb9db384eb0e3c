@@ -1,0 +1,18 @@
+internal/transport/yandex/captcha.go
+  h_4bfcd31e5ba605 546-548,552-553
+internal/transport/yandex/greedvm.go
+  h_4bfcd31e5ba605 15,32-78,346-355
+internal/transport/yandex/yandex.go
+  h_4bfcd31e5ba605 482-487,516,519-522,525,905-908
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9f131a599e37f175b6c235d645cb9db384eb0e3c",
+  "prompts": {},
+  "humans": {
+    "h_4bfcd31e5ba605": {
+      "author": "Pmmlabs <microreticulum@pmmlabs.ru>"
+    }
+  }
+}
