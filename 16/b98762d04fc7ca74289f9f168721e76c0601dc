@@ -1,0 +1,14 @@
+internal/transport/yandex/yandex.go
+  h_4bfcd31e5ba605 51-57,146-152,312-314,316-322,330-332
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "16b98762d04fc7ca74289f9f168721e76c0601dc",
+  "prompts": {},
+  "humans": {
+    "h_4bfcd31e5ba605": {
+      "author": "Pmmlabs <microreticulum@pmmlabs.ru>"
+    }
+  }
+}
