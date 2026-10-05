@@ -1,0 +1,24 @@
+internal/tunnel/tunnel.go
+  s_2b87f50c377715::t_c3e057b31c43d9 257,259-270
+  s_2b87f50c377715::t_cb5d8f88ed12d2 258
+internal/transport/yandex/yandex.go
+  s_2b87f50c377715::t_3ac71d00c3e417 40-51
+  s_2b87f50c377715::t_98723351ac246f 453-457
+  s_2b87f50c377715::t_47ab86695f48e0 604
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f93a8bd1ac6f635695db6dc3b6c481bb332140c1",
+  "prompts": {},
+  "sessions": {
+    "s_2b87f50c377715": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ef8ebb2cdffeDQV82v5ma8Rf1c",
+        "model": "heavy"
+      },
+      "human_author": "Pmmlabs <microreticulum@pmmlabs.ru>"
+    }
+  }
+}
