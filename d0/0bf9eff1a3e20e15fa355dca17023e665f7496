@@ -1,0 +1,19 @@
+internal/tunnel/upstream_proxy_test.go
+  s_2b87f50c377715::t_2d29426c134355 25-28,434-439,483-486,488-492,494-495
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d00bf9eff1a3e20e15fa355dca17023e665f7496",
+  "prompts": {},
+  "sessions": {
+    "s_2b87f50c377715": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ef8ebb2cdffeDQV82v5ma8Rf1c",
+        "model": "heavy"
+      },
+      "human_author": "Pmmlabs <microreticulum@pmmlabs.ru>"
+    }
+  }
+}
